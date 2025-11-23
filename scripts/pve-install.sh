@@ -377,9 +377,10 @@ install_proxmox() {
     # Detect available CPU cores and RAM for optimal QEMU performance
     AVAILABLE_CORES=$(nproc)
     AVAILABLE_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
-    # Use half of available cores (min 4) and 8GB RAM for installation
+    # Use half of available cores (min 2, max 16, but never exceed available)
     QEMU_CORES=$((AVAILABLE_CORES / 2))
-    [ $QEMU_CORES -lt 4 ] && QEMU_CORES=4
+    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
+    [ $QEMU_CORES -gt $AVAILABLE_CORES ] && QEMU_CORES=$AVAILABLE_CORES
     [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
     QEMU_RAM=8192
     [ $AVAILABLE_RAM_MB -lt 16384 ] && QEMU_RAM=4096
@@ -496,7 +497,7 @@ configure_proxmox_via_ssh() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     # Configure DNS servers (Cloudflare and Google)
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$HOSTNAME' > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits based on system RAM
