@@ -11,6 +11,31 @@ CLR_RESET="\033[m"
 
 clear
 
+# Function to download files with error handling
+download_file() {
+    local output_file="$1"
+    local url="$2"
+    local max_retries=3
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+        if wget -q -O "$output_file" "$url"; then
+            if [ -s "$output_file" ]; then
+                return 0
+            else
+                echo -e "${CLR_RED}Downloaded file is empty: $output_file${CLR_RESET}"
+            fi
+        else
+            echo -e "${CLR_YELLOW}Download failed (attempt $((retry_count + 1))/$max_retries): $url${CLR_RESET}"
+        fi
+        retry_count=$((retry_count + 1))
+        [ $retry_count -lt $max_retries ] && sleep 2
+    done
+
+    echo -e "${CLR_RED}Failed to download $url after $max_retries attempts. Exiting.${CLR_RESET}"
+    exit 1
+}
+
 # Ensure the script is run as root
 if [[ $EUID != 0 ]]; then
     echo -e "${CLR_RED}Please run this script as root.${CLR_RESET}"
@@ -96,8 +121,21 @@ get_system_inputs() {
 prepare_packages() {
     echo -e "${CLR_BLUE}Installing packages...${CLR_RESET}"
     echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" | tee /etc/apt/sources.list.d/pve.list
-    curl -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg
-    apt clean && apt update && apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass
+
+    if ! curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg; then
+        echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if ! apt clean || ! apt update; then
+        echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if ! apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass; then
+        echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
+        exit 1
+    fi
 
     echo -e "${CLR_GREEN}Packages installed.${CLR_RESET}"
 }
@@ -120,14 +158,25 @@ download_proxmox_iso() {
         echo -e "${CLR_YELLOW}Proxmox ISO file already exists, skipping download.${CLR_RESET}"
         return 0
     fi
-    
+
     echo -e "${CLR_BLUE}Downloading Proxmox ISO...${CLR_RESET}"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
         exit 1
     fi
-    wget -O pve.iso "$PROXMOX_ISO_URL"
+
+    if ! wget -O pve.iso "$PROXMOX_ISO_URL"; then
+        echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if [[ ! -s "pve.iso" ]]; then
+        echo -e "${CLR_RED}Downloaded ISO file is empty or corrupted! Exiting.${CLR_RESET}"
+        rm -f pve.iso
+        exit 1
+    fi
+
     echo -e "${CLR_GREEN}Proxmox ISO downloaded.${CLR_RESET}"
 }
 
@@ -236,11 +285,11 @@ make_template_files() {
     echo -e "${CLR_YELLOW}Downloading template files...${CLR_RESET}"
     mkdir -p ./template_files
 
-    wget -O ./template_files/99-proxmox.conf https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf
-    wget -O ./template_files/hosts https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts
-    wget -O ./template_files/interfaces https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces
-    wget -O ./template_files/debian.sources https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/debian.sources
-    wget -O ./template_files/proxmox.sources https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/proxmox.sources
+    download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf"
+    download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts"
+    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces"
+    download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/debian.sources"
+    download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/proxmox.sources"
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
