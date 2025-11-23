@@ -68,7 +68,7 @@ get_system_inputs() {
     read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
     read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
     read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
-    read -e -p "Enter your private subnet : " -i "192.168.26.0/24" PRIVATE_SUBNET
+    read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
     read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
     
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
