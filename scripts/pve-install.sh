@@ -11,6 +11,116 @@ CLR_RESET="\033[m"
 
 clear
 
+# Function to download files with error handling
+download_file() {
+    local output_file="$1"
+    local url="$2"
+    local max_retries=3
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+        if wget -q -O "$output_file" "$url"; then
+            if [ -s "$output_file" ]; then
+                return 0
+            else
+                echo -e "${CLR_RED}Downloaded file is empty: $output_file${CLR_RESET}"
+            fi
+        else
+            echo -e "${CLR_YELLOW}Download failed (attempt $((retry_count + 1))/$max_retries): $url${CLR_RESET}"
+        fi
+        retry_count=$((retry_count + 1))
+        [ $retry_count -lt $max_retries ] && sleep 2
+    done
+
+    echo -e "${CLR_RED}Failed to download $url after $max_retries attempts. Exiting.${CLR_RESET}"
+    exit 1
+}
+
+# Input validation functions
+validate_hostname() {
+    local hostname="$1"
+    # Hostname: alphanumeric and hyphens, 1-63 chars, cannot start/end with hyphen
+    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_fqdn() {
+    local fqdn="$1"
+    # FQDN: valid hostname labels separated by dots
+    if [[ ! "$fqdn" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_email() {
+    local email="$1"
+    # Basic email validation
+    if [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_subnet() {
+    local subnet="$1"
+    # Validate CIDR notation (e.g., 10.0.0.0/24)
+    if [[ ! "$subnet" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
+        return 1
+    fi
+    # Validate each octet is 0-255
+    local ip="${subnet%/*}"
+    IFS='.' read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if [ "$octet" -gt 255 ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+validate_timezone() {
+    local tz="$1"
+    # Check if timezone file exists
+    if [[ -f "/usr/share/zoneinfo/$tz" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Function to detect NVMe drives
+detect_nvme_drives() {
+    echo -e "${CLR_BLUE}Detecting NVMe drives...${CLR_RESET}"
+
+    # Find all NVMe drives (excluding partitions)
+    NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
+
+    if [ ${#NVME_DRIVES[@]} -eq 0 ]; then
+        echo -e "${CLR_RED}No NVMe drives detected! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    echo -e "${CLR_GREEN}Detected ${#NVME_DRIVES[@]} NVMe drive(s):${CLR_RESET}"
+    for drive in "${NVME_DRIVES[@]}"; do
+        local size=$(lsblk -d -n -o SIZE "$drive")
+        echo "  - $drive ($size)"
+    done
+
+    if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
+        echo -e "${CLR_YELLOW}Warning: Only ${#NVME_DRIVES[@]} NVMe drive detected. RAID-1 requires 2 drives.${CLR_RESET}"
+        echo -e "${CLR_YELLOW}Installation will proceed with single drive (no RAID).${CLR_RESET}"
+        RAID_MODE="single"
+    else
+        RAID_MODE="raid1"
+    fi
+
+    # Set drive variables for QEMU
+    NVME_DRIVE_1="${NVME_DRIVES[0]}"
+    NVME_DRIVE_2="${NVME_DRIVES[1]:-}"
+}
+
 # Ensure the script is run as root
 if [[ $EUID != 0 ]]; then
     echo -e "${CLR_RED}Please run this script as root.${CLR_RESET}"
@@ -63,12 +173,47 @@ get_system_inputs() {
     echo "IPv6 CIDR: $IPV6_CIDR"
     echo "IPv6: $MAIN_IPV6"
     
-    # Get user input for other configuration
-    read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
-    read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
-    read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
-    read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
-    read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+    # Get user input for other configuration with validation
+    while true; do
+        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
+        if validate_hostname "$HOSTNAME"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
+        if validate_fqdn "$FQDN"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid FQDN. Use format: hostname.domain.tld${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
+        if validate_timezone "$TIMEZONE"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
+        if validate_email "$EMAIL"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+        if validate_subnet "$PRIVATE_SUBNET"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+    done
+
     read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
     
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
@@ -96,8 +241,21 @@ get_system_inputs() {
 prepare_packages() {
     echo -e "${CLR_BLUE}Installing packages...${CLR_RESET}"
     echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" | tee /etc/apt/sources.list.d/pve.list
-    curl -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg
-    apt clean && apt update && apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass
+
+    if ! curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg; then
+        echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if ! apt clean || ! apt update; then
+        echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if ! apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass; then
+        echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
+        exit 1
+    fi
 
     echo -e "${CLR_GREEN}Packages installed.${CLR_RESET}"
 }
@@ -120,19 +278,69 @@ download_proxmox_iso() {
         echo -e "${CLR_YELLOW}Proxmox ISO file already exists, skipping download.${CLR_RESET}"
         return 0
     fi
-    
+
     echo -e "${CLR_BLUE}Downloading Proxmox ISO...${CLR_RESET}"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
         exit 1
     fi
-    wget -O pve.iso "$PROXMOX_ISO_URL"
+
+    # Extract ISO filename and construct checksum URL
+    ISO_FILENAME=$(basename "$PROXMOX_ISO_URL")
+    CHECKSUM_URL="https://enterprise.proxmox.com/iso/SHA256SUMS"
+
+    echo -e "${CLR_YELLOW}Downloading: $ISO_FILENAME${CLR_RESET}"
+
+    if ! wget -O pve.iso "$PROXMOX_ISO_URL"; then
+        echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if [[ ! -s "pve.iso" ]]; then
+        echo -e "${CLR_RED}Downloaded ISO file is empty or corrupted! Exiting.${CLR_RESET}"
+        rm -f pve.iso
+        exit 1
+    fi
+
+    # Verify ISO checksum
+    echo -e "${CLR_BLUE}Verifying ISO checksum...${CLR_RESET}"
+    if wget -q -O SHA256SUMS "$CHECKSUM_URL"; then
+        EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
+        if [[ -n "$EXPECTED_CHECKSUM" ]]; then
+            ACTUAL_CHECKSUM=$(sha256sum pve.iso | awk '{print $1}')
+            if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
+                echo -e "${CLR_GREEN}ISO checksum verified successfully.${CLR_RESET}"
+            else
+                echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
+                echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
+                echo -e "${CLR_RED}Actual:   $ACTUAL_CHECKSUM${CLR_RESET}"
+                rm -f pve.iso SHA256SUMS
+                exit 1
+            fi
+        else
+            echo -e "${CLR_YELLOW}Warning: Could not find checksum for $ISO_FILENAME, skipping verification.${CLR_RESET}"
+        fi
+        rm -f SHA256SUMS
+    else
+        echo -e "${CLR_YELLOW}Warning: Could not download checksum file, skipping verification.${CLR_RESET}"
+    fi
+
     echo -e "${CLR_GREEN}Proxmox ISO downloaded.${CLR_RESET}"
 }
 
 make_answer_toml() {
     echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
+
+    # Build disk_list based on detected drives (using vda/vdb for QEMU virtio)
+    if [ "$RAID_MODE" = "raid1" ]; then
+        DISK_LIST='["/dev/vda", "/dev/vdb"]'
+        ZFS_RAID="raid1"
+    else
+        DISK_LIST='["/dev/vda"]'
+        ZFS_RAID="single"
+    fi
+
     cat <<EOF > answer.toml
 [global]
     keyboard = "en-us"
@@ -148,11 +356,11 @@ make_answer_toml() {
 
 [disk-setup]
     filesystem = "zfs"
-    zfs.raid = "raid1"
-    disk_list = ["/dev/vda", "/dev/vdb"]
+    zfs.raid = "$ZFS_RAID"
+    disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}answer.toml created.${CLR_RESET}"
+    echo -e "${CLR_GREEN}answer.toml created (ZFS $ZFS_RAID mode).${CLR_RESET}"
 }
 
 make_autoinstall_iso() {
@@ -176,16 +384,33 @@ install_proxmox() {
         UEFI_OPTS=""
         echo -e "UEFI Not Supported! Booting in legacy mode."
     fi
-    echo -e "${CLR_YELLOW}Installing Proxmox VE${CLR_RESET}"
-	echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RED}"
-	echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+
+    # Detect available CPU cores and RAM for optimal QEMU performance
+    AVAILABLE_CORES=$(nproc)
+    AVAILABLE_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
+    # Use half of available cores (min 4) and 8GB RAM for installation
+    QEMU_CORES=$((AVAILABLE_CORES / 2))
+    [ $QEMU_CORES -lt 4 ] && QEMU_CORES=4
+    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
+    QEMU_RAM=8192
+    [ $AVAILABLE_RAM_MB -lt 16384 ] && QEMU_RAM=4096
+
+    echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
+    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RESET}"
+    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+
+    # Build QEMU drive arguments based on detected NVMe drives
+    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
+    if [ -n "$NVME_DRIVE_2" ]; then
+        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    fi
+
     qemu-system-x86_64 \
         -enable-kvm $UEFI_OPTS \
-        -cpu host -smp 4 -m 4096 \
+        -cpu host -smp $QEMU_CORES -m $QEMU_RAM \
         -boot d -cdrom ./pve-autoinstall.iso \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio -no-reboot -display none > /dev/null 2>&1
+        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1
 }
 
 # Function to boot the installed Proxmox via QEMU with port forwarding
@@ -199,14 +424,19 @@ boot_proxmox_with_port_forwarding() {
         UEFI_OPTS=""
         echo -e "${CLR_YELLOW}UEFI Not Supported! Booting in legacy mode.${CLR_RESET}"
     fi
-    # UEFI_OPTS=""
+
+    # Build QEMU drive arguments based on detected NVMe drives
+    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
+    if [ -n "$NVME_DRIVE_2" ]; then
+        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    fi
+
     # Start QEMU in background with port forwarding
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
-        -smp 4 -m 4096 \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio -display none \
+        -smp $QEMU_CORES -m $QEMU_RAM \
+        $DRIVE_ARGS -display none \
         > qemu_output.log 2>&1 &
     
     QEMU_PID=$!
@@ -236,11 +466,11 @@ make_template_files() {
     echo -e "${CLR_YELLOW}Downloading template files...${CLR_RESET}"
     mkdir -p ./template_files
 
-    wget -O ./template_files/99-proxmox.conf https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf
-    wget -O ./template_files/hosts https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts
-    wget -O ./template_files/interfaces https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces
-    wget -O ./template_files/debian.sources https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/debian.sources
-    wget -O ./template_files/proxmox.sources https://github.com/ariadata/proxmox-hetzner/raw/refs/heads/main/files/template_files/proxmox.sources
+    download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/99-proxmox.conf"
+    download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/hosts"
+    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/interfaces"
+    download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/debian.sources"
+    download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/proxmox.sources"
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
@@ -278,10 +508,41 @@ configure_proxmox_via_ssh() {
     # comment out the line in the sources.list file
     #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/pve-enterprise.list"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
-    #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 4.2.2.4\nnameserver 9.9.9.9' | tee /etc/resolv.conf"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 185.12.64.1\nnameserver 185.12.64.2\nnameserver 1.1.1.1\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
+    # Configure DNS servers (Cloudflare and Google)
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
+
+    # Configure ZFS ARC memory limits based on system RAM
+    echo -e "${CLR_YELLOW}Configuring ZFS ARC memory limits...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'ZFSEOF'
+        # Get total RAM in bytes
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+
+        # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
+        if [ $TOTAL_RAM_GB -ge 128 ]; then
+            ARC_MIN=$((16 * 1024 * 1024 * 1024))  # 16GB min for 128GB+ systems
+            ARC_MAX=$((64 * 1024 * 1024 * 1024))  # 64GB max
+        elif [ $TOTAL_RAM_GB -ge 64 ]; then
+            ARC_MIN=$((8 * 1024 * 1024 * 1024))   # 8GB min
+            ARC_MAX=$((32 * 1024 * 1024 * 1024))  # 32GB max
+        elif [ $TOTAL_RAM_GB -ge 32 ]; then
+            ARC_MIN=$((4 * 1024 * 1024 * 1024))   # 4GB min
+            ARC_MAX=$((16 * 1024 * 1024 * 1024))  # 16GB max
+        else
+            ARC_MIN=$((1 * 1024 * 1024 * 1024))   # 1GB min
+            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))  # 50% of RAM max
+        fi
+
+        # Create ZFS configuration
+        mkdir -p /etc/modprobe.d
+        echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
+        echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
+
+        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
+ZFSEOF
+
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
@@ -311,6 +572,7 @@ reboot_to_main_os() {
 
 
 # Main execution flow
+detect_nvme_drives
 get_system_inputs
 prepare_packages
 download_proxmox_iso
