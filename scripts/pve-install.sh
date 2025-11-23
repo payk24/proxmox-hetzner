@@ -90,6 +90,37 @@ validate_timezone() {
     return 1
 }
 
+# Function to detect NVMe drives
+detect_nvme_drives() {
+    echo -e "${CLR_BLUE}Detecting NVMe drives...${CLR_RESET}"
+
+    # Find all NVMe drives (excluding partitions)
+    NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
+
+    if [ ${#NVME_DRIVES[@]} -eq 0 ]; then
+        echo -e "${CLR_RED}No NVMe drives detected! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    echo -e "${CLR_GREEN}Detected ${#NVME_DRIVES[@]} NVMe drive(s):${CLR_RESET}"
+    for drive in "${NVME_DRIVES[@]}"; do
+        local size=$(lsblk -d -n -o SIZE "$drive")
+        echo "  - $drive ($size)"
+    done
+
+    if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
+        echo -e "${CLR_YELLOW}Warning: Only ${#NVME_DRIVES[@]} NVMe drive detected. RAID-1 requires 2 drives.${CLR_RESET}"
+        echo -e "${CLR_YELLOW}Installation will proceed with single drive (no RAID).${CLR_RESET}"
+        RAID_MODE="single"
+    else
+        RAID_MODE="raid1"
+    fi
+
+    # Set drive variables for QEMU
+    NVME_DRIVE_1="${NVME_DRIVES[0]}"
+    NVME_DRIVE_2="${NVME_DRIVES[1]:-}"
+}
+
 # Ensure the script is run as root
 if [[ $EUID != 0 ]]; then
     echo -e "${CLR_RED}Please run this script as root.${CLR_RESET}"
@@ -255,6 +286,12 @@ download_proxmox_iso() {
         exit 1
     fi
 
+    # Extract ISO filename and construct checksum URL
+    ISO_FILENAME=$(basename "$PROXMOX_ISO_URL")
+    CHECKSUM_URL="https://enterprise.proxmox.com/iso/SHA256SUMS"
+
+    echo -e "${CLR_YELLOW}Downloading: $ISO_FILENAME${CLR_RESET}"
+
     if ! wget -O pve.iso "$PROXMOX_ISO_URL"; then
         echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
         exit 1
@@ -266,11 +303,44 @@ download_proxmox_iso() {
         exit 1
     fi
 
+    # Verify ISO checksum
+    echo -e "${CLR_BLUE}Verifying ISO checksum...${CLR_RESET}"
+    if wget -q -O SHA256SUMS "$CHECKSUM_URL"; then
+        EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
+        if [[ -n "$EXPECTED_CHECKSUM" ]]; then
+            ACTUAL_CHECKSUM=$(sha256sum pve.iso | awk '{print $1}')
+            if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
+                echo -e "${CLR_GREEN}ISO checksum verified successfully.${CLR_RESET}"
+            else
+                echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
+                echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
+                echo -e "${CLR_RED}Actual:   $ACTUAL_CHECKSUM${CLR_RESET}"
+                rm -f pve.iso SHA256SUMS
+                exit 1
+            fi
+        else
+            echo -e "${CLR_YELLOW}Warning: Could not find checksum for $ISO_FILENAME, skipping verification.${CLR_RESET}"
+        fi
+        rm -f SHA256SUMS
+    else
+        echo -e "${CLR_YELLOW}Warning: Could not download checksum file, skipping verification.${CLR_RESET}"
+    fi
+
     echo -e "${CLR_GREEN}Proxmox ISO downloaded.${CLR_RESET}"
 }
 
 make_answer_toml() {
     echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
+
+    # Build disk_list based on detected drives (using vda/vdb for QEMU virtio)
+    if [ "$RAID_MODE" = "raid1" ]; then
+        DISK_LIST='["/dev/vda", "/dev/vdb"]'
+        ZFS_RAID="raid1"
+    else
+        DISK_LIST='["/dev/vda"]'
+        ZFS_RAID="single"
+    fi
+
     cat <<EOF > answer.toml
 [global]
     keyboard = "en-us"
@@ -286,11 +356,11 @@ make_answer_toml() {
 
 [disk-setup]
     filesystem = "zfs"
-    zfs.raid = "raid1"
-    disk_list = ["/dev/vda", "/dev/vdb"]
+    zfs.raid = "$ZFS_RAID"
+    disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}answer.toml created.${CLR_RESET}"
+    echo -e "${CLR_GREEN}answer.toml created (ZFS $ZFS_RAID mode).${CLR_RESET}"
 }
 
 make_autoinstall_iso() {
@@ -314,16 +384,33 @@ install_proxmox() {
         UEFI_OPTS=""
         echo -e "UEFI Not Supported! Booting in legacy mode."
     fi
-    echo -e "${CLR_YELLOW}Installing Proxmox VE${CLR_RESET}"
-	echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RED}"
-	echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+
+    # Detect available CPU cores and RAM for optimal QEMU performance
+    AVAILABLE_CORES=$(nproc)
+    AVAILABLE_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
+    # Use half of available cores (min 4) and 8GB RAM for installation
+    QEMU_CORES=$((AVAILABLE_CORES / 2))
+    [ $QEMU_CORES -lt 4 ] && QEMU_CORES=4
+    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
+    QEMU_RAM=8192
+    [ $AVAILABLE_RAM_MB -lt 16384 ] && QEMU_RAM=4096
+
+    echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
+    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RESET}"
+    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+
+    # Build QEMU drive arguments based on detected NVMe drives
+    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
+    if [ -n "$NVME_DRIVE_2" ]; then
+        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    fi
+
     qemu-system-x86_64 \
         -enable-kvm $UEFI_OPTS \
-        -cpu host -smp 4 -m 4096 \
+        -cpu host -smp $QEMU_CORES -m $QEMU_RAM \
         -boot d -cdrom ./pve-autoinstall.iso \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio -no-reboot -display none > /dev/null 2>&1
+        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1
 }
 
 # Function to boot the installed Proxmox via QEMU with port forwarding
@@ -337,14 +424,19 @@ boot_proxmox_with_port_forwarding() {
         UEFI_OPTS=""
         echo -e "${CLR_YELLOW}UEFI Not Supported! Booting in legacy mode.${CLR_RESET}"
     fi
-    # UEFI_OPTS=""
+
+    # Build QEMU drive arguments based on detected NVMe drives
+    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
+    if [ -n "$NVME_DRIVE_2" ]; then
+        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    fi
+
     # Start QEMU in background with port forwarding
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
-        -smp 4 -m 4096 \
-        -drive file=/dev/nvme0n1,format=raw,media=disk,if=virtio \
-        -drive file=/dev/nvme1n1,format=raw,media=disk,if=virtio -display none \
+        -smp $QEMU_CORES -m $QEMU_RAM \
+        $DRIVE_ARGS -display none \
         > qemu_output.log 2>&1 &
     
     QEMU_PID=$!
@@ -420,6 +512,37 @@ configure_proxmox_via_ssh() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
+
+    # Configure ZFS ARC memory limits based on system RAM
+    echo -e "${CLR_YELLOW}Configuring ZFS ARC memory limits...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'ZFSEOF'
+        # Get total RAM in bytes
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+
+        # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
+        if [ $TOTAL_RAM_GB -ge 128 ]; then
+            ARC_MIN=$((16 * 1024 * 1024 * 1024))  # 16GB min for 128GB+ systems
+            ARC_MAX=$((64 * 1024 * 1024 * 1024))  # 64GB max
+        elif [ $TOTAL_RAM_GB -ge 64 ]; then
+            ARC_MIN=$((8 * 1024 * 1024 * 1024))   # 8GB min
+            ARC_MAX=$((32 * 1024 * 1024 * 1024))  # 32GB max
+        elif [ $TOTAL_RAM_GB -ge 32 ]; then
+            ARC_MIN=$((4 * 1024 * 1024 * 1024))   # 4GB min
+            ARC_MAX=$((16 * 1024 * 1024 * 1024))  # 16GB max
+        else
+            ARC_MIN=$((1 * 1024 * 1024 * 1024))   # 1GB min
+            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))  # 50% of RAM max
+        fi
+
+        # Create ZFS configuration
+        mkdir -p /etc/modprobe.d
+        echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
+        echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
+
+        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
+ZFSEOF
+
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
@@ -449,6 +572,7 @@ reboot_to_main_os() {
 
 
 # Main execution flow
+detect_nvme_drives
 get_system_inputs
 prepare_packages
 download_proxmox_iso
