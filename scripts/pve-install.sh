@@ -223,6 +223,29 @@ get_system_inputs() {
     echo ""
     echo "Private subnet: $PRIVATE_SUBNET"
     echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
+
+    # SSH Public Key (required for hardened SSH config)
+    echo ""
+    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+    echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
+    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+    echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
+    echo "SSH access will be restricted to Cloudflare IPs only."
+    echo ""
+    echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
+    echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+    echo ""
+    read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+
+    while [[ -z "$SSH_PUBLIC_KEY" ]]; do
+        echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+    done
+
+    # Validate SSH key format
+    if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
+        echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+    fi
 }
 
 
@@ -460,6 +483,11 @@ make_template_files() {
     download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/debian.sources"
     download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/proxmox.sources"
 
+    # Security hardening templates
+    download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/sshd_config"
+    download_file "./template_files/jail.local" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/jail.local"
+    download_file "./template_files/update-cloudflare-ips.sh" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/scripts/update-cloudflare-ips.sh"
+
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
@@ -474,6 +502,11 @@ make_template_files() {
     sed -i "s|{{MAC_ADDRESS}}|$MAC_ADDRESS|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
+
+    # Process fail2ban jail.local
+    echo -e "${CLR_YELLOW}Processing fail2ban configuration...${CLR_RESET}"
+    sed -i "s|{{EMAIL}}|$EMAIL|g" ./template_files/jail.local
+    sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/jail.local
 
     echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
 }
@@ -528,6 +561,74 @@ configure_proxmox_via_ssh() {
         echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
 ZFSEOF
 
+    # Configure CPU governor for performance
+    echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
+        # Install cpufrequtils for CPU governor management
+        apt-get update -qq && apt-get install -yqq cpufrequtils
+
+        # Set performance governor
+        echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
+
+        # Apply immediately to all CPUs
+        for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            echo "performance" > "$cpu" 2>/dev/null || true
+        done
+
+        echo "CPU governor set to performance"
+CPUEOF
+
+    # Deploy security configurations
+    echo -e "${CLR_YELLOW}Deploying SSH hardening and security configurations...${CLR_RESET}"
+
+    # Copy security files
+    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
+    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/jail.local root@localhost:/etc/fail2ban/jail.local
+    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/update-cloudflare-ips.sh root@localhost:/usr/local/bin/update-cloudflare-ips.sh
+
+    # Deploy SSH public key
+    echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+
+    # Install and configure fail2ban and security tools
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'SECURITYEOF'
+        echo "Installing security packages..."
+        apt-get update -qq
+        apt-get install -yqq fail2ban ipset iptables-persistent curl
+
+        # Create iptables directory if it doesn't exist
+        mkdir -p /etc/iptables
+
+        # Make Cloudflare IP update script executable
+        chmod +x /usr/local/bin/update-cloudflare-ips.sh
+
+        # Run Cloudflare IP update to set up initial rules
+        echo "Fetching Cloudflare IPs and configuring firewall..."
+        /usr/local/bin/update-cloudflare-ips.sh || echo "Warning: Cloudflare IP update failed (will retry on first boot)"
+
+        # Set up cron job to update Cloudflare IPs every 6 hours
+        echo "Setting up Cloudflare IP update cron job..."
+        (crontab -l 2>/dev/null | grep -v 'update-cloudflare-ips'; echo "0 */6 * * * /usr/local/bin/update-cloudflare-ips.sh >> /var/log/cloudflare-ip-update.log 2>&1") | crontab -
+
+        # Enable and start fail2ban
+        echo "Enabling fail2ban..."
+        systemctl enable fail2ban
+        systemctl restart fail2ban
+
+        # Restart SSH to apply new configuration
+        echo "Restarting SSH service..."
+        systemctl restart sshd
+
+        echo "Security configuration completed!"
+SECURITYEOF
+
+    echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
+    echo "  - SSH: Key-only authentication, modern ciphers"
+    echo "  - Fail2ban: SSH protection (3 attempts = 24h ban)"
+    echo "  - Firewall: Ports 22, 80, 443 restricted to Cloudflare IPs only"
+    echo "  - CPU governor: Performance mode"
+
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
@@ -540,9 +641,27 @@ ZFSEOF
 
 # Function to reboot into the main OS
 reboot_to_main_os() {
-    echo -e "${CLR_GREEN}Installation complete!${CLR_RESET}"
-    echo -e "${CLR_YELLOW}After rebooting, you will be able to access your Proxmox at https://${MAIN_IPV4_CIDR%/*}:8006${CLR_RESET}"
-    
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    echo ""
+    echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
+    echo "  ✓ SSH public key deployed"
+    echo "  ✓ Password authentication DISABLED"
+    echo "  ✓ Ports 22, 80, 443 restricted to Cloudflare IPs only"
+    echo "  ✓ Fail2ban active (3 attempts = 24h ban)"
+    echo "  ✓ CPU governor set to performance"
+    echo "  ✓ Kernel parameters optimized for virtualization"
+    echo ""
+    echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
+    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006 (direct access)"
+    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*} (Cloudflare only)"
+    echo "  HTTP/S:    Ports 80/443 (Cloudflare only)"
+    echo ""
+    echo -e "${CLR_RED}Note: SSH/HTTP/HTTPS only work through Cloudflare!${CLR_RESET}"
+    echo -e "${CLR_YELLOW}Cloudflare IPs auto-update every 6 hours via cron.${CLR_RESET}"
+    echo ""
+
     #ask user to reboot the system
     read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
