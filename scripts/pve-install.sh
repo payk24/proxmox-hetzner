@@ -625,8 +625,8 @@ SECURITYEOF
 
     echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
     echo "  - SSH: Key-only authentication, modern ciphers"
-    echo "  - Fail2ban: SSH and Proxmox web UI protection"
-    echo "  - Firewall: SSH restricted to Cloudflare IPs only"
+    echo "  - Fail2ban: SSH protection (3 attempts = 24h ban)"
+    echo "  - Firewall: Ports 22, 80, 443 restricted to Cloudflare IPs only"
     echo "  - CPU governor: Performance mode"
 
     # Power off the VM
@@ -648,16 +648,18 @@ reboot_to_main_os() {
     echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
     echo "  ✓ SSH public key deployed"
     echo "  ✓ Password authentication DISABLED"
-    echo "  ✓ SSH restricted to Cloudflare IPs only"
+    echo "  ✓ Ports 22, 80, 443 restricted to Cloudflare IPs only"
     echo "  ✓ Fail2ban active (3 attempts = 24h ban)"
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo ""
     echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
-    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
-    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*} (from Cloudflare IPs only)"
+    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006 (direct access)"
+    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*} (Cloudflare only)"
+    echo "  HTTP/S:    Ports 80/443 (Cloudflare only)"
     echo ""
-    echo -e "${CLR_RED}Note: SSH will only work through Cloudflare Tunnel/Access!${CLR_RESET}"
+    echo -e "${CLR_RED}Note: SSH/HTTP/HTTPS only work through Cloudflare!${CLR_RESET}"
+    echo -e "${CLR_YELLOW}Cloudflare IPs auto-update every 6 hours via cron.${CLR_RESET}"
     echo ""
 
     #ask user to reboot the system
