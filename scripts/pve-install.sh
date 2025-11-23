@@ -36,6 +36,60 @@ download_file() {
     exit 1
 }
 
+# Input validation functions
+validate_hostname() {
+    local hostname="$1"
+    # Hostname: alphanumeric and hyphens, 1-63 chars, cannot start/end with hyphen
+    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_fqdn() {
+    local fqdn="$1"
+    # FQDN: valid hostname labels separated by dots
+    if [[ ! "$fqdn" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_email() {
+    local email="$1"
+    # Basic email validation
+    if [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+validate_subnet() {
+    local subnet="$1"
+    # Validate CIDR notation (e.g., 10.0.0.0/24)
+    if [[ ! "$subnet" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
+        return 1
+    fi
+    # Validate each octet is 0-255
+    local ip="${subnet%/*}"
+    IFS='.' read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        if [ "$octet" -gt 255 ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+validate_timezone() {
+    local tz="$1"
+    # Check if timezone file exists
+    if [[ -f "/usr/share/zoneinfo/$tz" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Ensure the script is run as root
 if [[ $EUID != 0 ]]; then
     echo -e "${CLR_RED}Please run this script as root.${CLR_RESET}"
@@ -88,12 +142,47 @@ get_system_inputs() {
     echo "IPv6 CIDR: $IPV6_CIDR"
     echo "IPv6: $MAIN_IPV6"
     
-    # Get user input for other configuration
-    read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
-    read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
-    read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
-    read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
-    read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+    # Get user input for other configuration with validation
+    while true; do
+        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
+        if validate_hostname "$HOSTNAME"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
+        if validate_fqdn "$FQDN"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid FQDN. Use format: hostname.domain.tld${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
+        if validate_timezone "$TIMEZONE"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
+        if validate_email "$EMAIL"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
+    done
+
+    while true; do
+        read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+        if validate_subnet "$PRIVATE_SUBNET"; then
+            break
+        fi
+        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+    done
+
     read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
     
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
@@ -327,8 +416,8 @@ configure_proxmox_via_ssh() {
     # comment out the line in the sources.list file
     #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/pve-enterprise.list"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
-    #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 4.2.2.4\nnameserver 9.9.9.9' | tee /etc/resolv.conf"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 185.12.64.1\nnameserver 185.12.64.2\nnameserver 1.1.1.1\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
+    # Configure DNS servers (Cloudflare and Google)
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
     # Power off the VM
