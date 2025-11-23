@@ -153,16 +153,6 @@ get_system_inputs() {
     MAIN_IPV4=$(echo "$MAIN_IPV4_CIDR" | cut -d'/' -f1)
     MAIN_IPV4_GW=$(ip route | grep default | xargs | cut -d" " -f3)
     MAC_ADDRESS=$(ip link show "$INTERFACE_NAME" | awk '/ether/ {print $2}')
-    IPV6_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet6 " | xargs | cut -d" " -f2)
-    MAIN_IPV6=$(echo "$IPV6_CIDR" | cut -d'/' -f1)
-    
-    # Set a default value for FIRST_IPV6_CIDR even if IPV6_CIDR is empty
-    if [ -n "$IPV6_CIDR" ]; then
-        FIRST_IPV6_CIDR="$(echo "$IPV6_CIDR" | cut -d'/' -f1 | cut -d':' -f1-4):1::1/80"
-    else
-        FIRST_IPV6_CIDR=""
-    fi
-    
     # Display detected information
     echo -e "${CLR_YELLOW}Detected Network Information:${CLR_RESET}"
     echo "Interface Name: $INTERFACE_NAME"
@@ -170,8 +160,6 @@ get_system_inputs() {
     echo "Main IPv4: $MAIN_IPV4"
     echo "Main IPv4 Gateway: $MAIN_IPV4_GW"
     echo "MAC Address: $MAC_ADDRESS"
-    echo "IPv6 CIDR: $IPV6_CIDR"
-    echo "IPv6: $MAIN_IPV6"
     
     # Get user input for other configuration with validation
     while true; do
@@ -477,7 +465,6 @@ make_template_files() {
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
     sed -i "s|{{HOSTNAME}}|$HOSTNAME|g" ./template_files/hosts
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
     echo -e "${CLR_YELLOW}Processing interfaces file...${CLR_RESET}"
@@ -485,10 +472,8 @@ make_template_files() {
     sed -i "s|{{MAIN_IPV4_CIDR}}|$MAIN_IPV4_CIDR|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
     sed -i "s|{{MAC_ADDRESS}}|$MAC_ADDRESS|g" ./template_files/interfaces
-    sed -i "s|{{IPV6_CIDR}}|$IPV6_CIDR|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
-    sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
     echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
 }
