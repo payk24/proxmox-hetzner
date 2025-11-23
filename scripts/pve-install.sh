@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 set -e
 cd /root
 
@@ -146,7 +146,7 @@ get_system_inputs() {
     fi
     
     # Prompt user for interface name
-    read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "eno1" INTERFACE_NAME
+    read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
     
     # Now get network information based on the selected interface
     MAIN_IPV4_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet " | xargs | cut -d" " -f2)
@@ -202,8 +202,9 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-    
+    read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
+    echo ""
+
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
     # Append .1 to get the first IP in the subnet
@@ -216,8 +217,8 @@ get_system_inputs() {
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
         # Print message in a new line
+        read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
         echo ""
-        read -e -p "Enter your System New root password: " NEW_ROOT_PASSWORD
     done
 
     echo ""
@@ -274,7 +275,7 @@ prepare_packages() {
 # Fetch latest Proxmox VE ISO
 get_latest_proxmox_ve_iso() {
     local base_url="https://enterprise.proxmox.com/iso/"
-    local latest_iso=$(curl -s "$base_url" | grep -oP 'proxmox-ve_[0-9]+\.[0-9]+-[0-9]+\.iso' | sort -V | tail -n1)
+    local latest_iso=$(curl -s "$base_url" | grep -oE 'proxmox-ve_[0-9]+\.[0-9]+-[0-9]+\.iso' | sort -V | tail -n1)
 
     if [[ -n "$latest_iso" ]]; then
         echo "${base_url}${latest_iso}"
@@ -399,9 +400,10 @@ install_proxmox() {
     # Detect available CPU cores and RAM for optimal QEMU performance
     AVAILABLE_CORES=$(nproc)
     AVAILABLE_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
-    # Use half of available cores (min 4) and 8GB RAM for installation
+    # Use half of available cores (min 2, max 16, but never exceed available)
     QEMU_CORES=$((AVAILABLE_CORES / 2))
-    [ $QEMU_CORES -lt 4 ] && QEMU_CORES=4
+    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
+    [ $QEMU_CORES -gt $AVAILABLE_CORES ] && QEMU_CORES=$AVAILABLE_CORES
     [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
     QEMU_RAM=8192
     [ $AVAILABLE_RAM_MB -lt 16384 ] && QEMU_RAM=4096
@@ -528,7 +530,7 @@ configure_proxmox_via_ssh() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     # Configure DNS servers (Cloudflare and Google)
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo $HOSTNAME > /etc/hostname"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$HOSTNAME' > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits based on system RAM
