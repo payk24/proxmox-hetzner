@@ -243,7 +243,6 @@ get_system_inputs() {
     echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
     echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
     echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
-    echo "SSH access will be restricted to Cloudflare IPs only."
     echo ""
     echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
     echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
@@ -499,8 +498,6 @@ make_template_files() {
 
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/sshd_config"
-    download_file "./template_files/jail.local" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/jail.local"
-    download_file "./template_files/update-cloudflare-ips.sh" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/scripts/update-cloudflare-ips.sh"
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
@@ -543,7 +540,7 @@ configure_proxmox_via_ssh() {
     # comment out the line in the sources.list file
     #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/pve-enterprise.list"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
-    # Configure DNS servers (Cloudflare and Google)
+    # Configure DNS servers
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$HOSTNAME' > /etc/hostname"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
@@ -600,50 +597,17 @@ CPUEOF
 
     # Copy security files
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/jail.local root@localhost:/etc/fail2ban/jail.local
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/update-cloudflare-ips.sh root@localhost:/usr/local/bin/update-cloudflare-ips.sh
 
     # Deploy SSH public key
     echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
 
-    # Install and configure fail2ban and security tools
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'SECURITYEOF'
-        echo "Installing security packages..."
-        apt-get update -qq
-        apt-get install -yqq fail2ban ipset iptables-persistent curl
-
-        # Create iptables directory if it doesn't exist
-        mkdir -p /etc/iptables
-
-        # Make Cloudflare IP update script executable
-        chmod +x /usr/local/bin/update-cloudflare-ips.sh
-
-        # Run Cloudflare IP update to set up initial rules
-        echo "Fetching Cloudflare IPs and configuring firewall..."
-        /usr/local/bin/update-cloudflare-ips.sh || echo "Warning: Cloudflare IP update failed (will retry on first boot)"
-
-        # Set up cron job to update Cloudflare IPs every 6 hours
-        echo "Setting up Cloudflare IP update cron job..."
-        (crontab -l 2>/dev/null | grep -v 'update-cloudflare-ips'; echo "0 */6 * * * /usr/local/bin/update-cloudflare-ips.sh >> /var/log/cloudflare-ip-update.log 2>&1") | crontab -
-
-        # Enable and start fail2ban
-        echo "Enabling fail2ban..."
-        systemctl enable fail2ban
-        systemctl restart fail2ban
-
-        # Restart SSH to apply new configuration
-        echo "Restarting SSH service..."
-        systemctl restart sshd
-
-        echo "Security configuration completed!"
-SECURITYEOF
+    # Restart SSH to apply new configuration
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl restart sshd"
 
     echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
     echo "  - SSH: Key-only authentication, modern ciphers"
-    echo "  - Fail2ban: SSH protection (3 attempts = 24h ban)"
-    echo "  - Firewall: Ports 22, 80, 443 restricted to Cloudflare IPs only"
     echo "  - CPU governor: Performance mode"
 
     # Power off the VM
@@ -665,18 +629,12 @@ reboot_to_main_os() {
     echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
     echo "  ✓ SSH public key deployed"
     echo "  ✓ Password authentication DISABLED"
-    echo "  ✓ Ports 22, 80, 443 restricted to Cloudflare IPs only"
-    echo "  ✓ Fail2ban active (3 attempts = 24h ban)"
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo ""
     echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
-    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006 (direct access)"
-    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*} (Cloudflare only)"
-    echo "  HTTP/S:    Ports 80/443 (Cloudflare only)"
-    echo ""
-    echo -e "${CLR_RED}Note: SSH/HTTP/HTTPS only work through Cloudflare!${CLR_RESET}"
-    echo -e "${CLR_YELLOW}Cloudflare IPs auto-update every 6 hours via cron.${CLR_RESET}"
+    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
+    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
     echo ""
 
     #ask user to reboot the system
