@@ -181,7 +181,7 @@ get_system_inputs() {
 
     # Get user input for other configuration with validation
     while true; do
-        read -e -p "Enter your hostname : " -i "proxmox-qoxi" HOSTNAME
+        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
         if validate_hostname "$HOSTNAME"; then
             break
         fi
@@ -205,7 +205,7 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your email address: " -i "admin@qoxi.cloud" EMAIL
+        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
         if validate_email "$EMAIL"; then
             break
         fi
