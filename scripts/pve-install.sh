@@ -649,6 +649,18 @@ CPUEOF
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
+    # Remove Proxmox subscription notice
+    echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'SUBEOF'
+        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
+            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+            systemctl restart pveproxy.service
+            echo "Subscription notice removed"
+        else
+            echo "proxmoxlib.js not found, skipping"
+        fi
+SUBEOF
+
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo -e "${CLR_YELLOW}Installing Tailscale VPN...${CLR_RESET}"
@@ -729,6 +741,7 @@ reboot_to_main_os() {
     echo "  ✓ Password authentication DISABLED"
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
+    echo "  ✓ Subscription notice removed"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
