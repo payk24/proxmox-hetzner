@@ -14,6 +14,8 @@ source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
 
+iface lo inet6 loopback
+
 iface {{INTERFACE_NAME}} inet manual
 
 auto vmbr0
@@ -29,6 +31,10 @@ iface vmbr0 inet static
     pointopoint {{MAIN_IPV4_GW}}
     up sysctl -p
 
+iface vmbr0 inet6 static
+    address {{IPV6_CIDR}}
+    gateway fe80::1
+
 auto vmbr1
 iface vmbr1 inet static
     address {{PRIVATE_IP_CIDR}}
@@ -39,3 +45,6 @@ iface vmbr1 inet static
     post-down iptables -t nat -D POSTROUTING -s '{{PRIVATE_SUBNET}}' -o vmbr0 -j MASQUERADE
     post-up   iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1
     post-down iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1
+
+iface vmbr1 inet6 static
+    address {{FIRST_IPV6_CIDR}}

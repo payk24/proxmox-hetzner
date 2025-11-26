@@ -62,7 +62,7 @@ The script will:
 - Download the latest Proxmox VE ISO
 - Create an auto-installation configuration
 - Install Proxmox VE with RAID-1 ZFS configuration
-- Configure networking for IPv4
+- Configure networking for both IPv4 and IPv6
 - Set up proper hostname and FQDN
 - Apply recommended system settings
 
