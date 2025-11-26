@@ -19,18 +19,16 @@ iface lo inet6 loopback
 auto #IFACE_NAME#
 iface #IFACE_NAME# inet manual
 
+# Main bridge - Hetzner official configuration
 auto vmbr0
 iface vmbr0 inet static
-    address #MAIN_IPV4_CIDR#
+    address #MAIN_IPV4#/32
     gateway #MAIN_IPV4_GW#
     bridge-ports #IFACE_NAME#
     bridge-stp off
-    bridge-fd 1
-    bridge-vlan-aware yes
-    bridge-vids 2-4094
-    hwaddress #MAIN_MAC_ADDR#
+    bridge-fd 0
     up sysctl -p
 
 iface vmbr0 inet6 static
-    address #MAIN_IPV6_CIDR#
+    address #MAIN_IPV6#/128
     gateway fe80::1
