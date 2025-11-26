@@ -76,7 +76,7 @@ Run these commands in your Proxmox environment for additional optimizations:
 apt update && apt -y upgrade && apt -y autoremove && pveupgrade && pveam update
 
 # Install useful utilities
-apt install -y curl libguestfs-tools unzip iptables-persistent net-tools
+apt install -y curl libguestfs-tools unzip
 ```
 
 > **Note:** Subscription notice is now removed automatically during installation.
