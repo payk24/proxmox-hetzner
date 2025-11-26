@@ -617,15 +617,20 @@ ZFSEOF
     # Disable enterprise repositories BEFORE apt update (they require subscription)
     echo -e "${CLR_YELLOW}Disabling enterprise repositories...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'REPOEOF'
-        # Disable Proxmox enterprise repository
-        if [ -f /etc/apt/sources.list.d/pve-enterprise.list ]; then
-            mv /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/sources.list.d/pve-enterprise.list.disabled
-            echo "Disabled pve-enterprise.list"
-        fi
-        # Disable Ceph enterprise repository
-        if [ -f /etc/apt/sources.list.d/ceph.list ]; then
-            mv /etc/apt/sources.list.d/ceph.list /etc/apt/sources.list.d/ceph.list.disabled
-            echo "Disabled ceph.list"
+        # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
+        # These require a paid subscription and cause 401 errors
+        for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$repo_file" ] || continue
+            if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
+                mv "$repo_file" "${repo_file}.disabled"
+                echo "Disabled $(basename "$repo_file")"
+            fi
+        done
+
+        # Also check and disable any enterprise sources in main sources.list
+        if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
+            sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
+            echo "Commented out enterprise repos in sources.list"
         fi
 REPOEOF
 
@@ -633,6 +638,7 @@ REPOEOF
     echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
         # Install cpufrequtils for CPU governor management (will work on bare metal after reboot)
+        # Note: enterprise repos already disabled above, so apt update should work without 401 errors
         apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || true
 
         # Set performance governor as default - this config will be applied on boot
@@ -731,18 +737,15 @@ TAILSCALESERVEEOF
     # Copy hardened sshd_config (disables password authentication)
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
 
-    # Restart SSH to apply new configuration (this disables password auth - must be last SSH operation!)
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl restart sshd"
-
     echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
-    # Power off the VM (use SSH key since password is now disabled)
+    # Power off the VM BEFORE restarting sshd (while password auth still works)
+    # This ensures we can connect and poweroff the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
-    # Note: poweroff command is sent before sshd restart takes effect on the connection
-    ssh -p 5555 -o StrictHostKeyChecking=no -o PasswordAuthentication=no root@localhost 'poweroff' || true
-    
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
+
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
