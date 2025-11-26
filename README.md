@@ -65,6 +65,7 @@ The script will:
 - Configure networking for both IPv4 and IPv6
 - Set up proper hostname and FQDN
 - Apply recommended system settings
+- **Optional:** Install Tailscale VPN with SSH and Web UI access
 
 ### 3. Optional Post-Installation Optimizations
 
@@ -104,6 +105,25 @@ After installation completes:
    - Password: *the password you set during installation*
 
 > You can also refer to the `notes.txt` file (downloaded during installation) for additional useful information.
+
+### Tailscale Remote Access (Optional)
+
+If you enabled Tailscale during installation, you can access your server securely from anywhere:
+
+| Access Method | URL/Command |
+|--------------|-------------|
+| **Web UI** | `https://YOUR-HOSTNAME.your-tailnet.ts.net` |
+| **SSH** | `ssh root@YOUR-TAILSCALE-IP` |
+
+**With Auth Key:** Both SSH and Web UI are configured automatically during installation.
+
+**Without Auth Key:** Run these commands after reboot to complete setup:
+```bash
+tailscale up --ssh
+tailscale serve --bg --https=443 https://127.0.0.1:8006
+```
+
+> Get your Tailscale auth key from: https://login.tailscale.com/admin/settings/keys
 
 ## 📚 Additional Resources
 
