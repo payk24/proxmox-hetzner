@@ -498,7 +498,6 @@ make_template_files() {
 
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/sshd_config"
-    download_file "./template_files/jail.local" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/files/template_files/jail.local"
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
@@ -598,34 +597,17 @@ CPUEOF
 
     # Copy security files
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/jail.local root@localhost:/etc/fail2ban/jail.local
 
     # Deploy SSH public key
     echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
 
-    # Install and configure fail2ban and security tools
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'SECURITYEOF'
-        echo "Installing security packages..."
-        apt-get update -qq
-        apt-get install -yqq fail2ban
-
-        # Enable and start fail2ban
-        echo "Enabling fail2ban..."
-        systemctl enable fail2ban
-        systemctl restart fail2ban
-
-        # Restart SSH to apply new configuration
-        echo "Restarting SSH service..."
-        systemctl restart sshd
-
-        echo "Security configuration completed!"
-SECURITYEOF
+    # Restart SSH to apply new configuration
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl restart sshd"
 
     echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
     echo "  - SSH: Key-only authentication, modern ciphers"
-    echo "  - Fail2ban: SSH protection (3 attempts = 24h ban)"
     echo "  - CPU governor: Performance mode"
 
     # Power off the VM
@@ -647,7 +629,6 @@ reboot_to_main_os() {
     echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
     echo "  ✓ SSH public key deployed"
     echo "  ✓ Password authentication DISABLED"
-    echo "  ✓ Fail2ban active (3 attempts = 24h ban)"
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo ""
