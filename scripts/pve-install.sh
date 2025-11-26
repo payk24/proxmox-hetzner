@@ -264,6 +264,35 @@ get_system_inputs() {
     if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
         echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
     fi
+
+    # Tailscale VPN Configuration (Optional)
+    echo ""
+    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+    echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
+    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+    echo "Tailscale provides secure remote access to your Proxmox server."
+    echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
+    echo ""
+    read -e -p "Install Tailscale? (y/n): " -i "y" INSTALL_TAILSCALE
+
+    if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
+        INSTALL_TAILSCALE="yes"
+        echo ""
+        echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
+        echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
+        echo ""
+        read -e -p "Tailscale Auth Key (leave empty for manual auth): " TAILSCALE_AUTH_KEY
+
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            echo -e "${CLR_GREEN}Auth key provided. Tailscale will be configured automatically.${CLR_RESET}"
+        else
+            echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up' manually after reboot.${CLR_RESET}"
+        fi
+    else
+        INSTALL_TAILSCALE="no"
+        TAILSCALE_AUTH_KEY=""
+        echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+    fi
 }
 
 
@@ -612,6 +641,39 @@ CPUEOF
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
+    # Install Tailscale if requested
+    if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+        echo -e "${CLR_YELLOW}Installing Tailscale VPN...${CLR_RESET}"
+        sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'TAILSCALEEOF'
+            # Add Tailscale repository and install
+            curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+            curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
+
+            apt-get update -qq
+            apt-get install -yqq tailscale
+
+            # Enable and start tailscaled service
+            systemctl enable tailscaled
+            systemctl start tailscaled
+
+            echo "Tailscale installed successfully"
+TAILSCALEEOF
+
+        # If auth key is provided, authenticate Tailscale
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            echo -e "${CLR_YELLOW}Authenticating Tailscale with provided auth key...${CLR_RESET}"
+            sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale up --authkey='$TAILSCALE_AUTH_KEY' --ssh"
+
+            # Get Tailscale IP for display
+            TAILSCALE_IP=$(sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale ip -4" 2>/dev/null || echo "pending")
+            echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+        else
+            TAILSCALE_IP="not authenticated"
+            echo -e "${CLR_YELLOW}Tailscale installed but not authenticated.${CLR_RESET}"
+            echo -e "${CLR_YELLOW}Run 'tailscale up' after reboot to authenticate.${CLR_RESET}"
+        fi
+    fi
+
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
@@ -633,10 +695,21 @@ reboot_to_main_os() {
     echo "  ✓ Password authentication DISABLED"
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
+    if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+        echo "  ✓ Tailscale VPN installed"
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            echo "  ✓ Tailscale authenticated (IP: ${TAILSCALE_IP:-pending})"
+        else
+            echo "  ⚠ Tailscale needs authentication (run 'tailscale up' after reboot)"
+        fi
+    fi
     echo ""
     echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
     echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
     echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
+    if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
+        echo "  Tailscale: ssh root@${TAILSCALE_IP}"
+    fi
     echo ""
 
     #ask user to reboot the system
