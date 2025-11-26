@@ -181,7 +181,7 @@ get_system_inputs() {
 
     # Get user input for other configuration with validation
     while true; do
-        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
+        read -e -p "Enter your hostname : " -i "proxmox-qoxi" HOSTNAME
         if validate_hostname "$HOSTNAME"; then
             break
         fi
@@ -189,7 +189,7 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your FQDN name : " -i "proxmox.example.com" FQDN
+        read -e -p "Enter your FQDN name : " -i "proxmox.local" FQDN
         if validate_fqdn "$FQDN"; then
             break
         fi
@@ -197,7 +197,7 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your timezone : " -i "Europe/Istanbul" TIMEZONE
+        read -e -p "Enter your timezone : " -i "Europe/Kyiv" TIMEZONE
         if validate_timezone "$TIMEZONE"; then
             break
         fi
@@ -205,7 +205,7 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
+        read -e -p "Enter your email address: " -i "admin@qoxi.cloud" EMAIL
         if validate_email "$EMAIL"; then
             break
         fi
