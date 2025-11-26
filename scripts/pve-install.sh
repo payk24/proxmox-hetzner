@@ -83,8 +83,14 @@ validate_subnet() {
 
 validate_timezone() {
     local tz="$1"
-    # Check if timezone file exists
+    # Check if timezone file exists (preferred validation)
     if [[ -f "/usr/share/zoneinfo/$tz" ]]; then
+        return 0
+    fi
+    # Fallback: In Rescue System, zoneinfo may not be available
+    # Validate format (Region/City or Region/Subregion/City)
+    if [[ "$tz" =~ ^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$ ]]; then
+        echo -e "${CLR_YELLOW}Note: Cannot verify timezone in Rescue System, format looks valid.${CLR_RESET}"
         return 0
     fi
     return 1
@@ -469,7 +475,8 @@ boot_proxmox_with_port_forwarding() {
     # Wait for SSH to become available on port 5555
     echo -e "${CLR_YELLOW}Waiting for SSH to become available on port 5555...${CLR_RESET}"
     for i in {1..60}; do
-        if nc -z localhost 5555; then
+        # Use bash built-in /dev/tcp instead of nc for better compatibility with Rescue System
+        if (echo >/dev/tcp/localhost/5555) 2>/dev/null; then
             echo -e "${CLR_GREEN}SSH is available on port 5555.${CLR_RESET}"
             break
         fi
@@ -516,11 +523,6 @@ make_template_files() {
     sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
-
-    # Process fail2ban jail.local
-    echo -e "${CLR_YELLOW}Processing fail2ban configuration...${CLR_RESET}"
-    sed -i "s|{{EMAIL}}|$EMAIL|g" ./template_files/jail.local
-    sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/jail.local
 
     echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
 }
