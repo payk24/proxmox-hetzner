@@ -75,12 +75,26 @@ Run these commands in your Proxmox environment for additional optimizations:
 # Update system packages
 apt update && apt -y upgrade && apt -y autoremove && pveupgrade && pveam update
 
-# Install useful utilities
-apt install -y curl libguestfs-tools unzip iptables-persistent net-tools
+# Monitoring & system utilities
+apt install -y btop iotop ncdu tmux pigz smartmontools jq bat
 
-# Remove subscription notice
-sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js && systemctl restart pveproxy.service
+# Optional: for VM image manipulation
+apt install -y libguestfs-tools
 ```
+
+**Utility descriptions:**
+| Package | Purpose |
+|---------|---------|
+| `btop` | Modern system monitor (CPU, RAM, disk, network) |
+| `iotop` | Disk I/O monitoring |
+| `ncdu` | Interactive disk usage analyzer |
+| `tmux` | Terminal multiplexer (persistent sessions) |
+| `pigz` | Parallel gzip (faster backup compression) |
+| `smartmontools` | Disk health monitoring (SMART) |
+| `jq` | JSON parser (useful for API/scripts) |
+| `bat` | Modern `cat` with syntax highlighting |
+
+> **Note:** Subscription notice is removed automatically during installation.
 
 #### Optimize ZFS Memory Usage
 
