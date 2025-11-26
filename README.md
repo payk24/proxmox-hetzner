@@ -76,7 +76,7 @@ Run these commands in your Proxmox environment for additional optimizations:
 apt update && apt -y upgrade && apt -y autoremove && pveupgrade && pveam update
 
 # Monitoring & system utilities
-apt install -y btop iotop ncdu tmux pigz smartmontools
+apt install -y btop iotop ncdu tmux pigz smartmontools jq bat
 
 # Optional: for VM image manipulation
 apt install -y libguestfs-tools
@@ -91,6 +91,8 @@ apt install -y libguestfs-tools
 | `tmux` | Terminal multiplexer (persistent sessions) |
 | `pigz` | Parallel gzip (faster backup compression) |
 | `smartmontools` | Disk health monitoring (SMART) |
+| `jq` | JSON parser (useful for API/scripts) |
+| `bat` | Modern `cat` with syntax highlighting |
 
 > **Note:** Subscription notice is removed automatically during installation.
 
