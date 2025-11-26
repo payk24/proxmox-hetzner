@@ -288,9 +288,29 @@ get_system_inputs() {
         else
             echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up' manually after reboot.${CLR_RESET}"
         fi
+
+        # Tailscale features selection
+        echo ""
+        echo -e "${CLR_YELLOW}Tailscale Features:${CLR_RESET}"
+        read -e -p "Enable Tailscale SSH? (y/n): " -i "y" TAILSCALE_SSH
+        if [[ "$TAILSCALE_SSH" =~ ^[Yy]$ ]]; then
+            TAILSCALE_SSH="yes"
+        else
+            TAILSCALE_SSH="no"
+        fi
+
+        read -e -p "Enable Proxmox Web UI via Tailscale Serve? (y/n): " -i "y" TAILSCALE_WEBUI
+        if [[ "$TAILSCALE_WEBUI" =~ ^[Yy]$ ]]; then
+            TAILSCALE_WEBUI="yes"
+            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
+        else
+            TAILSCALE_WEBUI="no"
+        fi
     else
         INSTALL_TAILSCALE="no"
         TAILSCALE_AUTH_KEY=""
+        TAILSCALE_SSH="no"
+        TAILSCALE_WEBUI="no"
         echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
     fi
 }
@@ -659,18 +679,45 @@ CPUEOF
             echo "Tailscale installed successfully"
 TAILSCALEEOF
 
+        # Build tailscale up command with selected options
+        TAILSCALE_UP_CMD="tailscale up"
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            TAILSCALE_UP_CMD="$TAILSCALE_UP_CMD --authkey='$TAILSCALE_AUTH_KEY'"
+        fi
+        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+            TAILSCALE_UP_CMD="$TAILSCALE_UP_CMD --ssh"
+        fi
+
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             echo -e "${CLR_YELLOW}Authenticating Tailscale with provided auth key...${CLR_RESET}"
-            sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale up --authkey='$TAILSCALE_AUTH_KEY' --ssh"
+            sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "$TAILSCALE_UP_CMD"
 
-            # Get Tailscale IP for display
+            # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale ip -4" 2>/dev/null || echo "pending")
+            TAILSCALE_HOSTNAME=$(sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
             echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+
+            # Configure Tailscale Serve for Proxmox Web UI if requested
+            if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
+                echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
+                sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'TAILSCALESERVEEOF'
+                    # Configure tailscale serve to proxy HTTPS traffic to Proxmox Web UI
+                    # Port 443 on Tailscale will forward to localhost:8006 (Proxmox)
+                    tailscale serve --bg --https=443 https://127.0.0.1:8006
+
+                    echo "Tailscale Serve configured for Proxmox Web UI"
+TAILSCALESERVEEOF
+                echo -e "${CLR_GREEN}Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+            fi
         else
             TAILSCALE_IP="not authenticated"
+            TAILSCALE_HOSTNAME=""
             echo -e "${CLR_YELLOW}Tailscale installed but not authenticated.${CLR_RESET}"
             echo -e "${CLR_YELLOW}Run 'tailscale up' after reboot to authenticate.${CLR_RESET}"
+            if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
+                echo -e "${CLR_YELLOW}Then run 'tailscale serve --bg --https=443 https://127.0.0.1:8006' to enable Web UI.${CLR_RESET}"
+            fi
         fi
     fi
 
@@ -702,13 +749,28 @@ reboot_to_main_os() {
         else
             echo "  ⚠ Tailscale needs authentication (run 'tailscale up' after reboot)"
         fi
+        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+            echo "  ✓ Tailscale SSH enabled"
+        fi
+        if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
+            echo "  ✓ Tailscale Serve enabled for Proxmox Web UI"
+        fi
     fi
     echo ""
     echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
     echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
     echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
     if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        echo "  Tailscale: ssh root@${TAILSCALE_IP}"
+        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+            echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
+        fi
+        if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
+            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+                echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
+            else
+                echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
+            fi
+        fi
     fi
     echo ""
 
