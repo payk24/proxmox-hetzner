@@ -1,6 +1,5 @@
 # ============================================
 # Fail2ban Configuration for Proxmox VE
-# Hardened SSH protection with Cloudflare whitelist
 # ============================================
 
 [DEFAULT]
@@ -25,7 +24,7 @@ mta = sendmail
 # action = %(action_mwl)s  # ban + email with whois and logs
 action = %(action_)s  # just ban (no email, simpler)
 
-# Ignore localhost and Cloudflare IPs
+# Ignore localhost
 ignoreip = 127.0.0.1/8 ::1
 
 # Backend for monitoring log files

@@ -1,6 +1,5 @@
 # ============================================
 # Proxmox VE Hardened SSH Configuration
-# Only allows connections from Cloudflare IPs
 # ============================================
 
 # Basic settings
