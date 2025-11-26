@@ -632,18 +632,23 @@ REPOEOF
     # Configure CPU governor for performance
     echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
-        # Install cpufrequtils for CPU governor management
-        apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || echo "cpufrequtils installation skipped (may not be available)"
+        # Check if CPU frequency scaling is available (not available in QEMU/VMs)
+        if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
+            # Install cpufrequtils for CPU governor management
+            apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || true
 
-        # Set performance governor
-        echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
+            # Set performance governor as default
+            echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
 
-        # Apply immediately to all CPUs (may not work in QEMU)
-        for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-            echo "performance" > "$cpu" 2>/dev/null || true
-        done
+            # Apply immediately to all CPUs
+            for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+                [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true
+            done
 
-        echo "CPU governor set to performance"
+            echo "CPU governor set to performance"
+        else
+            echo "CPU frequency scaling not available (running in VM during installation - will work on bare metal)"
+        fi
 CPUEOF
 
     # Remove Proxmox subscription notice
