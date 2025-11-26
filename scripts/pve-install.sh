@@ -614,40 +614,37 @@ configure_proxmox_via_ssh() {
         echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
 ZFSEOF
 
+    # Disable enterprise repositories BEFORE apt update (they require subscription)
+    echo -e "${CLR_YELLOW}Disabling enterprise repositories...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'REPOEOF'
+        # Disable Proxmox enterprise repository
+        if [ -f /etc/apt/sources.list.d/pve-enterprise.list ]; then
+            mv /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/sources.list.d/pve-enterprise.list.disabled
+            echo "Disabled pve-enterprise.list"
+        fi
+        # Disable Ceph enterprise repository
+        if [ -f /etc/apt/sources.list.d/ceph.list ]; then
+            mv /etc/apt/sources.list.d/ceph.list /etc/apt/sources.list.d/ceph.list.disabled
+            echo "Disabled ceph.list"
+        fi
+REPOEOF
+
     # Configure CPU governor for performance
     echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
         # Install cpufrequtils for CPU governor management
-        apt-get update -qq && apt-get install -yqq cpufrequtils
+        apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || echo "cpufrequtils installation skipped (may not be available)"
 
         # Set performance governor
         echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
 
-        # Apply immediately to all CPUs
+        # Apply immediately to all CPUs (may not work in QEMU)
         for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
             echo "performance" > "$cpu" 2>/dev/null || true
         done
 
         echo "CPU governor set to performance"
 CPUEOF
-
-    # Deploy security configurations
-    echo -e "${CLR_YELLOW}Deploying SSH hardening and security configurations...${CLR_RESET}"
-
-    # Copy security files
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
-
-    # Deploy SSH public key
-    echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-
-    # Restart SSH to apply new configuration
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl restart sshd"
-
-    echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
-    echo "  - SSH: Key-only authentication, modern ciphers"
-    echo "  - CPU governor: Performance mode"
 
     # Remove Proxmox subscription notice
     echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
@@ -720,9 +717,28 @@ TAILSCALESERVEEOF
         fi
     fi
 
-    # Power off the VM
+    # Deploy SSH hardening LAST (after all other SSH operations, since it disables password auth)
+    echo -e "${CLR_YELLOW}Deploying SSH hardening and security configurations...${CLR_RESET}"
+
+    # Deploy SSH public key FIRST (before disabling password auth!)
+    echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+
+    # Copy hardened sshd_config (disables password authentication)
+    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
+
+    # Restart SSH to apply new configuration (this disables password auth - must be last SSH operation!)
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl restart sshd"
+
+    echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
+    echo "  - SSH: Key-only authentication, modern ciphers"
+    echo "  - CPU governor: Performance mode"
+
+    # Power off the VM (use SSH key since password is now disabled)
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
+    # Note: poweroff command is sent before sshd restart takes effect on the connection
+    ssh -p 5555 -o StrictHostKeyChecking=no -o PasswordAuthentication=no root@localhost 'poweroff' || true
     
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
