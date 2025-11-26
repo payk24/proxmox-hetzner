@@ -286,26 +286,14 @@ get_system_inputs() {
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             echo -e "${CLR_GREEN}Auth key provided. Tailscale will be configured automatically.${CLR_RESET}"
         else
-            echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up' manually after reboot.${CLR_RESET}"
+            echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
         fi
 
-        # Tailscale features selection
-        echo ""
-        echo -e "${CLR_YELLOW}Tailscale Features:${CLR_RESET}"
-        read -e -p "Enable Tailscale SSH? (y/n): " -i "y" TAILSCALE_SSH
-        if [[ "$TAILSCALE_SSH" =~ ^[Yy]$ ]]; then
-            TAILSCALE_SSH="yes"
-        else
-            TAILSCALE_SSH="no"
-        fi
-
-        read -e -p "Enable Proxmox Web UI via Tailscale Serve? (y/n): " -i "y" TAILSCALE_WEBUI
-        if [[ "$TAILSCALE_WEBUI" =~ ^[Yy]$ ]]; then
-            TAILSCALE_WEBUI="yes"
-            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
-        else
-            TAILSCALE_WEBUI="no"
-        fi
+        # Enable both SSH and Web UI by default
+        TAILSCALE_SSH="yes"
+        TAILSCALE_WEBUI="yes"
+        echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
+        echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
     else
         INSTALL_TAILSCALE="no"
         TAILSCALE_AUTH_KEY=""
@@ -714,10 +702,9 @@ TAILSCALESERVEEOF
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""
             echo -e "${CLR_YELLOW}Tailscale installed but not authenticated.${CLR_RESET}"
-            echo -e "${CLR_YELLOW}Run 'tailscale up' after reboot to authenticate.${CLR_RESET}"
-            if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                echo -e "${CLR_YELLOW}Then run 'tailscale serve --bg --https=443 https://127.0.0.1:8006' to enable Web UI.${CLR_RESET}"
-            fi
+            echo -e "${CLR_YELLOW}After reboot, run these commands to enable SSH and Web UI:${CLR_RESET}"
+            echo -e "${CLR_YELLOW}  tailscale up --ssh${CLR_RESET}"
+            echo -e "${CLR_YELLOW}  tailscale serve --bg --https=443 https://127.0.0.1:8006${CLR_RESET}"
         fi
     fi
 
@@ -743,17 +730,13 @@ reboot_to_main_os() {
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        echo "  ✓ Tailscale VPN installed"
+        echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             echo "  ✓ Tailscale authenticated (IP: ${TAILSCALE_IP:-pending})"
         else
-            echo "  ⚠ Tailscale needs authentication (run 'tailscale up' after reboot)"
-        fi
-        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-            echo "  ✓ Tailscale SSH enabled"
-        fi
-        if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-            echo "  ✓ Tailscale Serve enabled for Proxmox Web UI"
+            echo "  ⚠ Tailscale needs authentication after reboot:"
+            echo "      tailscale up --ssh"
+            echo "      tailscale serve --bg --https=443 https://127.0.0.1:8006"
         fi
     fi
     echo ""
@@ -761,15 +744,11 @@ reboot_to_main_os() {
     echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
     echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
     if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-            echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
-        fi
-        if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-                echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
-            else
-                echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
-            fi
+        echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
+        if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+            echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
+        else
+            echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
         fi
     fi
     echo ""
