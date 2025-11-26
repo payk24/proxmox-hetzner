@@ -75,11 +75,24 @@ Run these commands in your Proxmox environment for additional optimizations:
 # Update system packages
 apt update && apt -y upgrade && apt -y autoremove && pveupgrade && pveam update
 
-# Install useful utilities
-apt install -y curl libguestfs-tools unzip
+# Monitoring & system utilities
+apt install -y btop iotop ncdu tmux pigz smartmontools
+
+# Optional: for VM image manipulation
+apt install -y libguestfs-tools
 ```
 
-> **Note:** Subscription notice is now removed automatically during installation.
+**Utility descriptions:**
+| Package | Purpose |
+|---------|---------|
+| `btop` | Modern system monitor (CPU, RAM, disk, network) |
+| `iotop` | Disk I/O monitoring |
+| `ncdu` | Interactive disk usage analyzer |
+| `tmux` | Terminal multiplexer (persistent sessions) |
+| `pigz` | Parallel gzip (faster backup compression) |
+| `smartmontools` | Disk health monitoring (SMART) |
+
+> **Note:** Subscription notice is removed automatically during installation.
 
 #### Optimize ZFS Memory Usage
 
