@@ -174,6 +174,21 @@ log() {
 clear
 
 # =============================================================================
+# Install display utilities (boxes for tables, column for alignment)
+# =============================================================================
+install_display_utils() {
+    local need_install=false
+    command -v boxes &> /dev/null || need_install=true
+    command -v column &> /dev/null || need_install=true
+
+    if $need_install; then
+        apt-get update -qq > /dev/null 2>&1
+        apt-get install -qq -y boxes bsdmainutils > /dev/null 2>&1
+    fi
+}
+install_display_utils
+
+# =============================================================================
 # ASCII Banner
 # =============================================================================
 echo -e "${CLR_CYAN}"
@@ -202,51 +217,67 @@ echo ""
 # Helper functions
 # =============================================================================
 
-# Table drawing constants
-TABLE_WIDTH=55
-TABLE_COL1=17
-TABLE_COL2=35
-
-# Draw table border
-table_top() {
-    echo -e "${CLR_BLUE}┌$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┐${CLR_RESET}"
-}
-
-table_bottom() {
-    echo -e "${CLR_BLUE}└$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┘${CLR_RESET}"
-}
-
-table_separator() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┤${CLR_RESET}"
-}
-
-table_separator_cols() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┬$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
-}
-
-table_separator_cols_end() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┴$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
-}
-
-# Table header (full width)
-table_header() {
+# Display a boxed section with title using 'boxes'
+# Usage: display_box "title" "content"
+display_box() {
     local title="$1"
-    printf "${CLR_BLUE}│${CLR_RESET} ${CLR_CYAN}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$title"
+    local content="$2"
+    local box_style="${3:-stone}"
+
+    echo -e "${CLR_BLUE}"
+    {
+        echo "$title"
+        echo ""
+        echo "$content"
+    } | boxes -d "$box_style" -p a1
+    echo -e "${CLR_RESET}"
 }
 
-# Table row with two columns
-table_row() {
-    local col1="$1"
-    local col2="$2"
-    local color="${3:-${CLR_RESET}}"
-    printf "${CLR_BLUE}│${CLR_RESET} %-$((TABLE_COL1-2))s ${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_COL2-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$col1" "$col2"
+# Display system info table using boxes and column
+# Takes associative array-like pairs: "label|value|status"
+# status: ok=green, warn=yellow, error=red
+display_info_table() {
+    local title="$1"
+    shift
+    local items=("$@")
+
+    local content=""
+    for item in "${items[@]}"; do
+        local label="${item%%|*}"
+        local rest="${item#*|}"
+        local value="${rest%%|*}"
+        local status="${rest#*|}"
+
+        case "$status" in
+            ok)    content+="[OK]     $label: $value"$'\n' ;;
+            warn)  content+="[WARN]   $label: $value"$'\n' ;;
+            error) content+="[ERROR]  $label: $value"$'\n' ;;
+            *)     content+="         $label: $value"$'\n' ;;
+        esac
+    done
+
+    # Remove trailing newline and display
+    content="${content%$'\n'}"
+
+    echo ""
+    {
+        echo "=== $title ==="
+        echo ""
+        echo "$content"
+    } | boxes -d stone -p a1
+    echo ""
 }
 
-# Table row full width
-table_row_full() {
-    local text="$1"
-    local color="${2:-${CLR_RESET}}"
-    printf "${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$text"
+# Colorize the output of boxes (post-process)
+colorize_status() {
+    local green=$'\033[1;32m'
+    local yellow=$'\033[1;33m'
+    local red=$'\033[1;31m'
+    local reset=$'\033[m'
+
+    sed -e "s/\[OK\]/${green}[OK]${reset}/g" \
+        -e "s/\[WARN\]/${yellow}[WARN]${reset}/g" \
+        -e "s/\[ERROR\]/${red}[ERROR]${reset}/g"
 }
 
 # Download files with retry
@@ -611,36 +642,90 @@ show_system_status() {
         RAID_MODE="raid1"
     fi
 
-    # Print combined system info table using helper functions
-    table_top
-    table_header "System Information"
-    table_separator_cols
-    table_row "Root Access" "$PREFLIGHT_ROOT" "$PREFLIGHT_ROOT_CLR"
-    table_row "Internet" "$PREFLIGHT_NET" "$PREFLIGHT_NET_CLR"
-    table_row "Disk Space" "$PREFLIGHT_DISK" "$PREFLIGHT_DISK_CLR"
-    table_row "RAM" "$PREFLIGHT_RAM" "$PREFLIGHT_RAM_CLR"
-    table_row "CPU" "$PREFLIGHT_CPU" "$PREFLIGHT_CPU_CLR"
-    table_row "KVM" "$PREFLIGHT_KVM" "$PREFLIGHT_KVM_CLR"
-    table_separator_cols_end
-    table_header "Storage"
-    table_separator
+    # Build system info using column for alignment
+    local sys_rows=""
 
+    # Root access
+    if [[ "$PREFLIGHT_ROOT" == *"Running as root"* ]]; then
+        sys_rows+="[OK]|Root Access|Running as root"$'\n'
+    else
+        sys_rows+="[ERROR]|Root Access|Not root"$'\n'
+    fi
+
+    # Internet
+    if [[ "$PREFLIGHT_NET" == *"Available"* ]]; then
+        sys_rows+="[OK]|Internet|Available"$'\n'
+    else
+        sys_rows+="[ERROR]|Internet|No connection"$'\n'
+    fi
+
+    # Disk space
+    if [[ "$PREFLIGHT_DISK" == *"✓"* ]]; then
+        local disk_val="${PREFLIGHT_DISK#✓ }"
+        sys_rows+="[OK]|Disk Space|${disk_val}"$'\n'
+    else
+        local disk_val="${PREFLIGHT_DISK#✗ }"
+        sys_rows+="[ERROR]|Disk Space|${disk_val}"$'\n'
+    fi
+
+    # RAM
+    if [[ "$PREFLIGHT_RAM" == *"✓"* ]]; then
+        local ram_val="${PREFLIGHT_RAM#✓ }"
+        sys_rows+="[OK]|RAM|${ram_val}"$'\n'
+    else
+        local ram_val="${PREFLIGHT_RAM#✗ }"
+        sys_rows+="[ERROR]|RAM|${ram_val}"$'\n'
+    fi
+
+    # CPU
+    if [[ "$PREFLIGHT_CPU" == *"✓"* ]]; then
+        local cpu_val="${PREFLIGHT_CPU#✓ }"
+        sys_rows+="[OK]|CPU|${cpu_val}"$'\n'
+    elif [[ "$PREFLIGHT_CPU" == *"⚠"* ]]; then
+        local cpu_val="${PREFLIGHT_CPU#⚠ }"
+        sys_rows+="[WARN]|CPU|${cpu_val}"$'\n'
+    else
+        local cpu_val="${PREFLIGHT_CPU#✗ }"
+        sys_rows+="[ERROR]|CPU|${cpu_val}"$'\n'
+    fi
+
+    # KVM
+    if [[ "$PREFLIGHT_KVM" == *"Available"* ]]; then
+        sys_rows+="[OK]|KVM|Available"
+    else
+        sys_rows+="[ERROR]|KVM|Not available"
+    fi
+
+    # Build storage rows
+    local storage_rows=""
     if [ $nvme_error -eq 1 ]; then
-        table_row_full "✗ No NVMe drives detected!" "$CLR_RED"
+        storage_rows="[ERROR]|No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            local drive_info=$(printf "✓ %-10s %5s  %s" "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}")
-            table_row_full "$drive_info" "$CLR_GREEN"
+            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"$'\n'
         done
+        storage_rows="${storage_rows%$'\n'}"
     fi
 
-    table_separator
+    # Build RAID mode line
+    local raid_line
     if [ "$RAID_MODE" = "single" ]; then
-        table_row_full "Mode: Single Drive (no RAID)" "$CLR_YELLOW"
+        raid_line="[WARN]  Mode: Single Drive (no RAID)"
     else
-        table_row_full "Mode: ZFS RAID-1 (mirror)" "$CLR_GREEN"
+        raid_line="[OK]    Mode: ZFS RAID-1 (mirror)"
     fi
-    table_bottom
+
+    # Display with boxes and colorize
+    echo ""
+    {
+        echo "SYSTEM INFORMATION"
+        echo "$sys_rows" | column -t -s '|'
+        echo ""
+        echo "--- Storage ---"
+        echo "$storage_rows" | column -t -s '|'
+        echo ""
+        echo "$raid_line"
+    } | boxes -d stone -p a1 | colorize_status
     echo ""
 
     # Check for errors
@@ -654,7 +739,7 @@ show_system_status() {
         exit 1
     fi
 
-    echo -e "${CLR_GREEN}✓ All checks passed!${CLR_RESET}"
+    echo -e "${CLR_GREEN}All checks passed!${CLR_RESET}"
     echo ""
 
     # Set drive variables for QEMU

@@ -32,36 +32,90 @@ show_system_status() {
         RAID_MODE="raid1"
     fi
 
-    # Print combined system info table using helper functions
-    table_top
-    table_header "System Information"
-    table_separator_cols
-    table_row "Root Access" "$PREFLIGHT_ROOT" "$PREFLIGHT_ROOT_CLR"
-    table_row "Internet" "$PREFLIGHT_NET" "$PREFLIGHT_NET_CLR"
-    table_row "Disk Space" "$PREFLIGHT_DISK" "$PREFLIGHT_DISK_CLR"
-    table_row "RAM" "$PREFLIGHT_RAM" "$PREFLIGHT_RAM_CLR"
-    table_row "CPU" "$PREFLIGHT_CPU" "$PREFLIGHT_CPU_CLR"
-    table_row "KVM" "$PREFLIGHT_KVM" "$PREFLIGHT_KVM_CLR"
-    table_separator_cols_end
-    table_header "Storage"
-    table_separator
+    # Build system info using column for alignment
+    local sys_rows=""
 
+    # Root access
+    if [[ "$PREFLIGHT_ROOT" == *"Running as root"* ]]; then
+        sys_rows+="[OK]|Root Access|Running as root"$'\n'
+    else
+        sys_rows+="[ERROR]|Root Access|Not root"$'\n'
+    fi
+
+    # Internet
+    if [[ "$PREFLIGHT_NET" == *"Available"* ]]; then
+        sys_rows+="[OK]|Internet|Available"$'\n'
+    else
+        sys_rows+="[ERROR]|Internet|No connection"$'\n'
+    fi
+
+    # Disk space
+    if [[ "$PREFLIGHT_DISK" == *"✓"* ]]; then
+        local disk_val="${PREFLIGHT_DISK#✓ }"
+        sys_rows+="[OK]|Disk Space|${disk_val}"$'\n'
+    else
+        local disk_val="${PREFLIGHT_DISK#✗ }"
+        sys_rows+="[ERROR]|Disk Space|${disk_val}"$'\n'
+    fi
+
+    # RAM
+    if [[ "$PREFLIGHT_RAM" == *"✓"* ]]; then
+        local ram_val="${PREFLIGHT_RAM#✓ }"
+        sys_rows+="[OK]|RAM|${ram_val}"$'\n'
+    else
+        local ram_val="${PREFLIGHT_RAM#✗ }"
+        sys_rows+="[ERROR]|RAM|${ram_val}"$'\n'
+    fi
+
+    # CPU
+    if [[ "$PREFLIGHT_CPU" == *"✓"* ]]; then
+        local cpu_val="${PREFLIGHT_CPU#✓ }"
+        sys_rows+="[OK]|CPU|${cpu_val}"$'\n'
+    elif [[ "$PREFLIGHT_CPU" == *"⚠"* ]]; then
+        local cpu_val="${PREFLIGHT_CPU#⚠ }"
+        sys_rows+="[WARN]|CPU|${cpu_val}"$'\n'
+    else
+        local cpu_val="${PREFLIGHT_CPU#✗ }"
+        sys_rows+="[ERROR]|CPU|${cpu_val}"$'\n'
+    fi
+
+    # KVM
+    if [[ "$PREFLIGHT_KVM" == *"Available"* ]]; then
+        sys_rows+="[OK]|KVM|Available"
+    else
+        sys_rows+="[ERROR]|KVM|Not available"
+    fi
+
+    # Build storage rows
+    local storage_rows=""
     if [ $nvme_error -eq 1 ]; then
-        table_row_full "✗ No NVMe drives detected!" "$CLR_RED"
+        storage_rows="[ERROR]|No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            local drive_info=$(printf "✓ %-10s %5s  %s" "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}")
-            table_row_full "$drive_info" "$CLR_GREEN"
+            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"$'\n'
         done
+        storage_rows="${storage_rows%$'\n'}"
     fi
 
-    table_separator
+    # Build RAID mode line
+    local raid_line
     if [ "$RAID_MODE" = "single" ]; then
-        table_row_full "Mode: Single Drive (no RAID)" "$CLR_YELLOW"
+        raid_line="[WARN]  Mode: Single Drive (no RAID)"
     else
-        table_row_full "Mode: ZFS RAID-1 (mirror)" "$CLR_GREEN"
+        raid_line="[OK]    Mode: ZFS RAID-1 (mirror)"
     fi
-    table_bottom
+
+    # Display with boxes and colorize
+    echo ""
+    {
+        echo "SYSTEM INFORMATION"
+        echo "$sys_rows" | column -t -s '|'
+        echo ""
+        echo "--- Storage ---"
+        echo "$storage_rows" | column -t -s '|'
+        echo ""
+        echo "$raid_line"
+    } | boxes -d stone -p a1 | colorize_status
     echo ""
 
     # Check for errors
@@ -75,7 +129,7 @@ show_system_status() {
         exit 1
     fi
 
-    echo -e "${CLR_GREEN}✓ All checks passed!${CLR_RESET}"
+    echo -e "${CLR_GREEN}All checks passed!${CLR_RESET}"
     echo ""
 
     # Set drive variables for QEMU

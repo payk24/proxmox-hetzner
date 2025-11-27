@@ -2,51 +2,67 @@
 # Helper functions
 # =============================================================================
 
-# Table drawing constants
-TABLE_WIDTH=55
-TABLE_COL1=17
-TABLE_COL2=35
-
-# Draw table border
-table_top() {
-    echo -e "${CLR_BLUE}┌$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┐${CLR_RESET}"
-}
-
-table_bottom() {
-    echo -e "${CLR_BLUE}└$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┘${CLR_RESET}"
-}
-
-table_separator() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┤${CLR_RESET}"
-}
-
-table_separator_cols() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┬$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
-}
-
-table_separator_cols_end() {
-    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┴$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
-}
-
-# Table header (full width)
-table_header() {
+# Display a boxed section with title using 'boxes'
+# Usage: display_box "title" "content"
+display_box() {
     local title="$1"
-    printf "${CLR_BLUE}│${CLR_RESET} ${CLR_CYAN}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$title"
+    local content="$2"
+    local box_style="${3:-stone}"
+
+    echo -e "${CLR_BLUE}"
+    {
+        echo "$title"
+        echo ""
+        echo "$content"
+    } | boxes -d "$box_style" -p a1
+    echo -e "${CLR_RESET}"
 }
 
-# Table row with two columns
-table_row() {
-    local col1="$1"
-    local col2="$2"
-    local color="${3:-${CLR_RESET}}"
-    printf "${CLR_BLUE}│${CLR_RESET} %-$((TABLE_COL1-2))s ${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_COL2-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$col1" "$col2"
+# Display system info table using boxes and column
+# Takes associative array-like pairs: "label|value|status"
+# status: ok=green, warn=yellow, error=red
+display_info_table() {
+    local title="$1"
+    shift
+    local items=("$@")
+
+    local content=""
+    for item in "${items[@]}"; do
+        local label="${item%%|*}"
+        local rest="${item#*|}"
+        local value="${rest%%|*}"
+        local status="${rest#*|}"
+
+        case "$status" in
+            ok)    content+="[OK]     $label: $value"$'\n' ;;
+            warn)  content+="[WARN]   $label: $value"$'\n' ;;
+            error) content+="[ERROR]  $label: $value"$'\n' ;;
+            *)     content+="         $label: $value"$'\n' ;;
+        esac
+    done
+
+    # Remove trailing newline and display
+    content="${content%$'\n'}"
+
+    echo ""
+    {
+        echo "=== $title ==="
+        echo ""
+        echo "$content"
+    } | boxes -d stone -p a1
+    echo ""
 }
 
-# Table row full width
-table_row_full() {
-    local text="$1"
-    local color="${2:-${CLR_RESET}}"
-    printf "${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$text"
+# Colorize the output of boxes (post-process)
+colorize_status() {
+    local green=$'\033[1;32m'
+    local yellow=$'\033[1;33m'
+    local red=$'\033[1;31m'
+    local reset=$'\033[m'
+
+    sed -e "s/\[OK\]/${green}[OK]${reset}/g" \
+        -e "s/\[WARN\]/${yellow}[WARN]${reset}/g" \
+        -e "s/\[ERROR\]/${red}[ERROR]${reset}/g"
 }
 
 # Download files with retry
