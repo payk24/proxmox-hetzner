@@ -783,11 +783,19 @@ ZFSEOF
         fi
 REPOEOF
 
+    # Update all system packages
+    echo -e "${CLR_YELLOW}Updating system packages...${CLR_RESET}"
+    remote_exec_script << 'UPDATEEOF'
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get dist-upgrade -yqq
+        echo "System packages updated"
+UPDATEEOF
+
     # Install monitoring and system utilities
     echo -e "${CLR_YELLOW}Installing monitoring and system utilities...${CLR_RESET}"
     remote_exec_script << 'UTILSEOF'
-        # Update packages first
-        apt-get update -qq
+        export DEBIAN_FRONTEND=noninteractive
 
         # Install monitoring & system utilities
         apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {

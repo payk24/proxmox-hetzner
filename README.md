@@ -85,14 +85,13 @@ The installation script automatically applies the following optimizations:
 | `libguestfs-tools` | VM image manipulation tools |
 
 **System Optimizations (applied automatically):**
+- All packages updated to latest versions (`apt dist-upgrade`)
 - ZFS ARC memory limits (dynamically calculated based on system RAM)
 - nf_conntrack optimized for high connection counts (max 1M connections)
 - CPU governor set to performance mode
 - Subscription notice removed
 - Enterprise repositories disabled (no subscription required)
 - Ceph UI hidden (not needed for single-server setup)
-
-> **Note:** After installation, you may want to run `apt update && apt upgrade` to get the latest package updates.
 
 ## ✅ Accessing Your Proxmox Server
 
