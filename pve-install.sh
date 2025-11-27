@@ -1007,6 +1007,7 @@ get_system_inputs() {
         DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
         TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
         EMAIL="${EMAIL:-admin@example.com}"
+        BRIDGE_MODE="${BRIDGE_MODE:-internal}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
         # Password handling in non-interactive mode
@@ -1112,32 +1113,60 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
         fi
 
-        # --- Private subnet selection menu ---
-        local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
-        local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
+        # --- Network bridge mode selection menu ---
+        local bridge_options=("internal" "external" "both")
+        local bridge_header="Configure network bridges for VMs and containers"$'\n'
+        bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
+        bridge_header+="vmbr1 = internal (NAT with private subnet)"
 
         interactive_menu \
-            "Private Subnet (↑/↓ select, Enter confirm)" \
-            "Internal network for VMs and containers" \
-            "10.0.0.0/24|Class A private (recommended)" \
-            "192.168.1.0/24|Class C private (common home network)" \
-            "172.16.0.0/24|Class B private" \
-            "Custom|Enter subnet manually"
+            "Network Bridge Mode (↑/↓ select, Enter confirm)" \
+            "$bridge_header" \
+            "Internal only (NAT)|VMs use private IPs with NAT to internet" \
+            "External only (Bridged)|VMs get IPs from your router/DHCP" \
+            "Both bridges|Internal NAT + External bridged network"
 
-        if [[ $MENU_SELECTED -eq 3 ]]; then
-            # Custom subnet - prompt for manual entry
-            local subnet_prompt="Enter your private subnet: "
-            while true; do
-                read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
-                if validate_subnet "$PRIVATE_SUBNET"; then
-                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
-                    break
-                fi
-                echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-            done
-        else
-            PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+        BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
+        case "$BRIDGE_MODE" in
+            internal)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Internal NAT only (vmbr0)"
+                ;;
+            external)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: External bridged only (vmbr0)"
+                ;;
+            both)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Both (vmbr0=external, vmbr1=internal)"
+                ;;
+        esac
+
+        # --- Private subnet selection menu (only if internal bridge is used) ---
+        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+            local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
+            local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
+
+            interactive_menu \
+                "Private Subnet (↑/↓ select, Enter confirm)" \
+                "Internal network for VMs and containers" \
+                "10.0.0.0/24|Class A private (recommended)" \
+                "192.168.1.0/24|Class C private (common home network)" \
+                "172.16.0.0/24|Class B private" \
+                "Custom|Enter subnet manually"
+
+            if [[ $MENU_SELECTED -eq 3 ]]; then
+                # Custom subnet - prompt for manual entry
+                local subnet_prompt="Enter your private subnet: "
+                while true; do
+                    read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
+                    if validate_subnet "$PRIVATE_SUBNET"; then
+                        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
+                        break
+                    fi
+                    echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+                done
+            else
+                PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+            fi
         fi
 
         # --- ZFS RAID mode selection menu (only if 2+ drives detected) ---
@@ -1304,11 +1333,14 @@ get_system_inputs() {
     # Calculate derived values
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
 
-    # Get the network prefix (first three octets) from PRIVATE_SUBNET
-    PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
-    PRIVATE_IP="${PRIVATE_CIDR}.1"
-    SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
-    PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
+    # Calculate private network values (only if internal bridge is used)
+    if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+        # Get the network prefix (first three octets) from PRIVATE_SUBNET
+        PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
+        PRIVATE_IP="${PRIVATE_CIDR}.1"
+        SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
+        PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
+    fi
 
     # Save config if requested
     if [[ -n "$SAVE_CONFIG" ]]; then
@@ -1546,6 +1578,144 @@ boot_proxmox_with_port_forwarding() {
 # Post-installation configuration
 # =============================================================================
 
+# Generate /etc/network/interfaces based on BRIDGE_MODE
+generate_interfaces_config() {
+    local output_file="$1"
+
+    cat > "$output_file" << 'HEADER'
+# network interface settings; autogenerated
+# Please do NOT modify this file directly, unless you know what
+# you're doing.
+#
+# If you want to manage parts of the network configuration manually,
+# please utilize the 'source' or 'source-directory' directives to do
+# so.
+# PVE will preserve these directives, but will NOT read its network
+# configuration from sourced files, so do not attempt to move any of
+# the PVE managed interfaces into external files!
+
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+iface lo inet6 loopback
+
+HEADER
+
+    case "$BRIDGE_MODE" in
+        internal)
+            # Internal only: physical interface has IP, vmbr0 is NAT bridge
+            cat >> "$output_file" << EOF
+# Physical interface with host IP
+auto $INTERFACE_NAME
+iface $INTERFACE_NAME inet static
+    address $MAIN_IPV4/32
+    gateway $MAIN_IPV4_GW
+    up sysctl -p
+
+iface $INTERFACE_NAME inet6 static
+    address $MAIN_IPV6/128
+    gateway fe80::1
+
+# vmbr0: Private NAT network for VMs
+# All VMs connect here and access internet via NAT
+auto vmbr0
+iface vmbr0 inet static
+    address $PRIVATE_IP_CIDR
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+    post-up   iptables -t nat -A POSTROUTING -s '$PRIVATE_SUBNET' -o $INTERFACE_NAME -j MASQUERADE
+    post-down iptables -t nat -D POSTROUTING -s '$PRIVATE_SUBNET' -o $INTERFACE_NAME -j MASQUERADE
+    post-up   iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1
+    post-down iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1
+EOF
+            # Add IPv6 to internal bridge if available
+            if [[ -n "$FIRST_IPV6_CIDR" ]]; then
+                cat >> "$output_file" << EOF
+
+iface vmbr0 inet6 static
+    address $FIRST_IPV6_CIDR
+EOF
+            fi
+            ;;
+
+        external)
+            # External only: physical interface in bridge, vmbr0 gets host IP
+            cat >> "$output_file" << EOF
+# Physical interface (no IP, part of bridge)
+auto $INTERFACE_NAME
+iface $INTERFACE_NAME inet manual
+
+# vmbr0: External bridge - VMs get IPs from router/DHCP
+# Host IP is on this bridge
+auto vmbr0
+iface vmbr0 inet static
+    address $MAIN_IPV4/32
+    gateway $MAIN_IPV4_GW
+    bridge-ports $INTERFACE_NAME
+    bridge-stp off
+    bridge-fd 0
+    up sysctl -p
+
+iface vmbr0 inet6 static
+    address $MAIN_IPV6/128
+    gateway fe80::1
+EOF
+            ;;
+
+        both)
+            # Both: vmbr0 = external with host IP, vmbr1 = internal NAT
+            cat >> "$output_file" << EOF
+# Physical interface (no IP, part of bridge)
+auto $INTERFACE_NAME
+iface $INTERFACE_NAME inet manual
+
+# vmbr0: External bridge - VMs get IPs from router/DHCP
+# Host IP is on this bridge
+auto vmbr0
+iface vmbr0 inet static
+    address $MAIN_IPV4/32
+    gateway $MAIN_IPV4_GW
+    bridge-ports $INTERFACE_NAME
+    bridge-stp off
+    bridge-fd 0
+    up sysctl -p
+
+iface vmbr0 inet6 static
+    address $MAIN_IPV6/128
+    gateway fe80::1
+
+# vmbr1: Private NAT network for VMs
+# VMs connect here for isolated network with NAT to internet
+auto vmbr1
+iface vmbr1 inet static
+    address $PRIVATE_IP_CIDR
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+    post-up   iptables -t nat -A POSTROUTING -s '$PRIVATE_SUBNET' -o vmbr0 -j MASQUERADE
+    post-down iptables -t nat -D POSTROUTING -s '$PRIVATE_SUBNET' -o vmbr0 -j MASQUERADE
+    post-up   iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1
+    post-down iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1
+EOF
+            # Add IPv6 to internal bridge if available
+            if [[ -n "$FIRST_IPV6_CIDR" ]]; then
+                cat >> "$output_file" << EOF
+
+iface vmbr1 inet6 static
+    address $FIRST_IPV6_CIDR
+EOF
+            fi
+            ;;
+    esac
+
+    echo "" >> "$output_file"  # Ensure file ends with newline
+}
+
 make_template_files() {
     echo -e "${CLR_BLUE}Modifying template files...${CLR_RESET}"
 
@@ -1554,7 +1724,6 @@ make_template_files() {
 
     download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
     download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
-    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/interfaces"
     download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
     download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
 
@@ -1568,15 +1737,9 @@ make_template_files() {
     sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
-    # Process interfaces file
-    echo -e "${CLR_YELLOW}Processing interfaces file...${CLR_RESET}"
-    sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
-    sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
+    # Generate interfaces file based on bridge mode
+    echo -e "${CLR_YELLOW}Generating interfaces file (mode: ${BRIDGE_MODE})...${CLR_RESET}"
+    generate_interfaces_config "./template_files/interfaces"
 
     echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
 }

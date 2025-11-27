@@ -100,6 +100,7 @@ get_system_inputs() {
         DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
         TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
         EMAIL="${EMAIL:-admin@example.com}"
+        BRIDGE_MODE="${BRIDGE_MODE:-internal}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
         # Password handling in non-interactive mode
@@ -205,32 +206,60 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
         fi
 
-        # --- Private subnet selection menu ---
-        local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
-        local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
+        # --- Network bridge mode selection menu ---
+        local bridge_options=("internal" "external" "both")
+        local bridge_header="Configure network bridges for VMs and containers"$'\n'
+        bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
+        bridge_header+="vmbr1 = internal (NAT with private subnet)"
 
         interactive_menu \
-            "Private Subnet (↑/↓ select, Enter confirm)" \
-            "Internal network for VMs and containers" \
-            "10.0.0.0/24|Class A private (recommended)" \
-            "192.168.1.0/24|Class C private (common home network)" \
-            "172.16.0.0/24|Class B private" \
-            "Custom|Enter subnet manually"
+            "Network Bridge Mode (↑/↓ select, Enter confirm)" \
+            "$bridge_header" \
+            "Internal only (NAT)|VMs use private IPs with NAT to internet" \
+            "External only (Bridged)|VMs get IPs from your router/DHCP" \
+            "Both bridges|Internal NAT + External bridged network"
 
-        if [[ $MENU_SELECTED -eq 3 ]]; then
-            # Custom subnet - prompt for manual entry
-            local subnet_prompt="Enter your private subnet: "
-            while true; do
-                read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
-                if validate_subnet "$PRIVATE_SUBNET"; then
-                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
-                    break
-                fi
-                echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-            done
-        else
-            PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+        BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
+        case "$BRIDGE_MODE" in
+            internal)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Internal NAT only (vmbr0)"
+                ;;
+            external)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: External bridged only (vmbr0)"
+                ;;
+            both)
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Both (vmbr0=external, vmbr1=internal)"
+                ;;
+        esac
+
+        # --- Private subnet selection menu (only if internal bridge is used) ---
+        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+            local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
+            local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
+
+            interactive_menu \
+                "Private Subnet (↑/↓ select, Enter confirm)" \
+                "Internal network for VMs and containers" \
+                "10.0.0.0/24|Class A private (recommended)" \
+                "192.168.1.0/24|Class C private (common home network)" \
+                "172.16.0.0/24|Class B private" \
+                "Custom|Enter subnet manually"
+
+            if [[ $MENU_SELECTED -eq 3 ]]; then
+                # Custom subnet - prompt for manual entry
+                local subnet_prompt="Enter your private subnet: "
+                while true; do
+                    read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
+                    if validate_subnet "$PRIVATE_SUBNET"; then
+                        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
+                        break
+                    fi
+                    echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+                done
+            else
+                PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+            fi
         fi
 
         # --- ZFS RAID mode selection menu (only if 2+ drives detected) ---
@@ -397,11 +426,14 @@ get_system_inputs() {
     # Calculate derived values
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
 
-    # Get the network prefix (first three octets) from PRIVATE_SUBNET
-    PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
-    PRIVATE_IP="${PRIVATE_CIDR}.1"
-    SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
-    PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
+    # Calculate private network values (only if internal bridge is used)
+    if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+        # Get the network prefix (first three octets) from PRIVATE_SUBNET
+        PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
+        PRIVATE_IP="${PRIVATE_CIDR}.1"
+        SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
+        PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
+    fi
 
     # Save config if requested
     if [[ -n "$SAVE_CONFIG" ]]; then
