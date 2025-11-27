@@ -183,21 +183,6 @@ trap cleanup_cursor EXIT INT TERM
 clear
 
 # =============================================================================
-# Install display utilities (boxes for tables, column for alignment)
-# =============================================================================
-install_display_utils() {
-    local need_install=false
-    command -v boxes &> /dev/null || need_install=true
-    command -v column &> /dev/null || need_install=true
-
-    if $need_install; then
-        apt-get update -qq > /dev/null 2>&1
-        apt-get install -qq -y boxes bsdmainutils > /dev/null 2>&1
-    fi
-}
-install_display_utils
-
-# =============================================================================
 # ASCII Banner
 # =============================================================================
 echo -e "${CLR_CYAN}"
@@ -811,7 +796,7 @@ prompt_password() {
 # Collect system info with progress indicator
 collect_system_info() {
     local errors=0
-    local checks=6
+    local checks=7
     local current=0
     local i=0
 
@@ -827,6 +812,16 @@ collect_system_info() {
         printf '░%.0s' $(seq 1 $empty 2>/dev/null) 2>/dev/null || true
         printf "${CLR_RESET}${CLR_YELLOW}] %3d%%${CLR_RESET}" "$pct"
     }
+
+    # Install display utilities (boxes for tables, column for alignment)
+    update_progress
+    local need_install=false
+    command -v boxes &> /dev/null || need_install=true
+    command -v column &> /dev/null || need_install=true
+    if $need_install; then
+        apt-get update -qq > /dev/null 2>&1
+        apt-get install -qq -y boxes bsdmainutils > /dev/null 2>&1
+    fi
 
     # Check if running as root
     update_progress
