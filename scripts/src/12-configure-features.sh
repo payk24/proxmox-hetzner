@@ -9,47 +9,45 @@ configure_optional_features() {
     # Hide Ceph from UI (optional, default: yes)
     # ==========================================================================
     if [[ "$HIDE_CEPH" == "yes" ]]; then
-        print_info "Hiding Ceph from UI..."
-        remote_exec_script << 'CEPHEOF'
-            # Create custom CSS to hide Ceph-related UI elements
-            CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-            cat > "$CUSTOM_CSS" << 'CSS'
+        {
+            remote_exec_script << 'CEPHEOF'
+                # Create custom CSS to hide Ceph-related UI elements
+                CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
+                cat > "$CUSTOM_CSS" << 'CSS'
 /* Hide Ceph menu items - not needed for single server */
 #pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
 .x-treelist-item-text:has-text("Ceph") { display: none !important; }
 tr[data-qtip*="Ceph"] { display: none !important; }
 CSS
 
-            # Add custom CSS to index template if not already added
-            INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-            if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-                sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-                echo "Custom CSS added to hide Ceph"
-            fi
-
-            # Alternative: patch JavaScript to hide Ceph panel completely
-            PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-            if [ -f "$PVE_MANAGER_JS" ]; then
-                if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                    sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
+                # Add custom CSS to index template if not already added
+                INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
+                if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
+                    sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
                 fi
-            fi
 
-            systemctl restart pveproxy.service
-            echo "Ceph UI elements hidden"
+                # Alternative: patch JavaScript to hide Ceph panel completely
+                PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
+                if [ -f "$PVE_MANAGER_JS" ]; then
+                    if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
+                        sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
+                    fi
+                fi
+
+                systemctl restart pveproxy.service
 CEPHEOF
-    else
-        print_info "Skipping Ceph UI hiding (disabled)"
+        } > /dev/null 2>&1 &
+        show_progress $! "Hiding Ceph from UI"
     fi
 
     # ==========================================================================
     # Journald Optimization (optional, default: yes)
     # ==========================================================================
     if [[ "$OPTIMIZE_JOURNALD" == "yes" ]]; then
-        print_info "Optimizing journald log settings..."
-        remote_exec_script << 'JOURNALDEOF'
-            mkdir -p /etc/systemd/journald.conf.d
-            cat > /etc/systemd/journald.conf.d/size-limit.conf << 'CONF'
+        {
+            remote_exec_script << 'JOURNALDEOF'
+                mkdir -p /etc/systemd/journald.conf.d
+                cat > /etc/systemd/journald.conf.d/size-limit.conf << 'CONF'
 [Journal]
 # Limit journal size to prevent disk fill
 SystemMaxUse=1G
@@ -60,15 +58,14 @@ MaxFileSec=1week
 Compress=yes
 CONF
 
-            # Restart journald to apply changes
-            systemctl restart systemd-journald
+                # Restart journald to apply changes
+                systemctl restart systemd-journald
 
-            # Clean up old logs
-            journalctl --vacuum-size=500M 2>/dev/null || true
-
-            echo "Journald optimized: max 1GB, 1 month retention"
+                # Clean up old logs
+                journalctl --vacuum-size=500M 2>/dev/null || true
 JOURNALDEOF
-        print_success "Journald optimization configured"
+        } > /dev/null 2>&1 &
+        show_progress $! "Optimizing journald log settings"
     fi
 
     # ==========================================================================
@@ -118,13 +115,13 @@ EOF
     # Custom MOTD (optional, default: yes)
     # ==========================================================================
     if [[ "$INSTALL_MOTD" == "yes" ]]; then
-        print_info "Configuring custom MOTD..."
-        remote_exec_script << 'MOTDEOF'
-            # Disable default MOTD components
-            chmod -x /etc/update-motd.d/* 2>/dev/null || true
+        {
+            remote_exec_script << 'MOTDEOF'
+                # Disable default MOTD components
+                chmod -x /etc/update-motd.d/* 2>/dev/null || true
 
-            # Create custom MOTD script
-            cat > /etc/update-motd.d/00-proxmox-info << 'SCRIPT'
+                # Create custom MOTD script
+                cat > /etc/update-motd.d/00-proxmox-info << 'SCRIPT'
 #!/bin/bash
 # Proxmox System Information MOTD
 
@@ -219,14 +216,13 @@ echo -e "  CTs:       ${CTS} total, ${GREEN}${RUNNING_CTS} running${NC}"
 echo ""
 SCRIPT
 
-            chmod +x /etc/update-motd.d/00-proxmox-info
+                chmod +x /etc/update-motd.d/00-proxmox-info
 
-            # Disable last login message
-            sed -i 's/^#*PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null || true
-
-            echo "Custom MOTD configured"
+                # Disable last login message
+                sed -i 's/^#*PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null || true
 MOTDEOF
-        print_success "Custom MOTD configured"
+        } > /dev/null 2>&1 &
+        show_progress $! "Configuring custom MOTD"
     fi
 
     # ==========================================================================
@@ -285,44 +281,42 @@ EOF
     # PCI Passthrough Preparation (optional, default: no)
     # ==========================================================================
     if [[ "$ENABLE_PCI_PASSTHROUGH" == "yes" ]]; then
-        print_info "Configuring PCI passthrough (IOMMU)..."
-        remote_exec_script << 'IOMMUEOF'
-            # Detect CPU vendor
-            if grep -q "GenuineIntel" /proc/cpuinfo; then
-                IOMMU_PARAM="intel_iommu=on"
-            elif grep -q "AuthenticAMD" /proc/cpuinfo; then
-                IOMMU_PARAM="amd_iommu=on"
-            else
-                echo "Unknown CPU vendor, using intel_iommu"
-                IOMMU_PARAM="intel_iommu=on"
-            fi
-
-            # Update GRUB configuration
-            GRUB_FILE="/etc/default/grub"
-            if [ -f "$GRUB_FILE" ]; then
-                # Backup original
-                cp "$GRUB_FILE" "${GRUB_FILE}.bak"
-
-                # Add IOMMU parameters if not present
-                if ! grep -q "iommu=on" "$GRUB_FILE"; then
-                    sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"${IOMMU_PARAM} iommu=pt /" "$GRUB_FILE"
+        {
+            remote_exec_script << 'IOMMUEOF'
+                # Detect CPU vendor
+                if grep -q "GenuineIntel" /proc/cpuinfo; then
+                    IOMMU_PARAM="intel_iommu=on"
+                elif grep -q "AuthenticAMD" /proc/cpuinfo; then
+                    IOMMU_PARAM="amd_iommu=on"
+                else
+                    IOMMU_PARAM="intel_iommu=on"
                 fi
 
-                # Update GRUB
-                update-grub
-                echo "GRUB updated with IOMMU parameters"
-            fi
+                # Update GRUB configuration
+                GRUB_FILE="/etc/default/grub"
+                if [ -f "$GRUB_FILE" ]; then
+                    # Backup original
+                    cp "$GRUB_FILE" "${GRUB_FILE}.bak"
 
-            # Add VFIO modules
-            cat > /etc/modules-load.d/vfio.conf << 'MODULES'
+                    # Add IOMMU parameters if not present
+                    if ! grep -q "iommu=on" "$GRUB_FILE"; then
+                        sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"${IOMMU_PARAM} iommu=pt /" "$GRUB_FILE"
+                    fi
+
+                    # Update GRUB
+                    update-grub
+                fi
+
+                # Add VFIO modules
+                cat > /etc/modules-load.d/vfio.conf << 'MODULES'
 vfio
 vfio_iommu_type1
 vfio_pci
 vfio_virqfd
 MODULES
 
-            # Blacklist GPU drivers for passthrough (commented by default)
-            cat > /etc/modprobe.d/pci-passthrough.conf << 'BLACKLIST'
+                # Blacklist GPU drivers for passthrough (commented by default)
+                cat > /etc/modprobe.d/pci-passthrough.conf << 'BLACKLIST'
 # Uncomment to blacklist drivers for GPU passthrough
 # blacklist nouveau
 # blacklist nvidia
@@ -333,51 +327,40 @@ MODULES
 # VFIO options
 options vfio-pci ids=
 BLACKLIST
-
-            echo "PCI passthrough prepared. Reboot required to enable IOMMU."
-            echo "To passthrough a device:"
-            echo "1. Find device ID: lspci -nn"
-            echo "2. Add ID to /etc/modprobe.d/pci-passthrough.conf"
-            echo "3. Regenerate initramfs: update-initramfs -u -k all"
 IOMMUEOF
-        print_success "PCI passthrough prepared (reboot required)"
+        } > /dev/null 2>&1 &
+        show_progress $! "Configuring PCI passthrough (IOMMU)"
     fi
 
     # ==========================================================================
     # Let's Encrypt Certificate (optional, default: no)
     # ==========================================================================
     if [[ "$INSTALL_LETSENCRYPT" == "yes" && -n "$LETSENCRYPT_DOMAIN" ]]; then
-        print_info "Configuring Let's Encrypt for ${LETSENCRYPT_DOMAIN}..."
-        remote_exec_script << LEEOF
-            export DEBIAN_FRONTEND=noninteractive
+        {
+            remote_exec_script << LEEOF
+                export DEBIAN_FRONTEND=noninteractive
 
-            # Install pve-acme for Proxmox ACME integration
-            apt-get install -yqq pve-acme 2>/dev/null || true
+                # Install pve-acme for Proxmox ACME integration
+                apt-get install -yqq pve-acme 2>/dev/null || true
 
-            # Register ACME account if not exists
-            if ! pvenode acme account list 2>/dev/null | grep -q "default"; then
-                pvenode acme account register default --contact "${EMAIL}" --directory https://acme-v02.api.letsencrypt.org/directory
-                echo "ACME account registered"
-            fi
-
-            # Configure domain for certificate
-            pvenode config set --acme "domains=${LETSENCRYPT_DOMAIN}"
-
-            # Order certificate
-            if pvenode acme cert order 2>/dev/null; then
-                echo "Let's Encrypt certificate obtained for ${LETSENCRYPT_DOMAIN}"
-
-                # Setup auto-renewal cron
-                if ! grep -q "pvenode acme cert renew" /etc/crontab 2>/dev/null; then
-                    echo "0 3 * * * root pvenode acme cert renew --force 2>/dev/null" >> /etc/crontab
-                    echo "Auto-renewal cron job added"
+                # Register ACME account if not exists
+                if ! pvenode acme account list 2>/dev/null | grep -q "default"; then
+                    pvenode acme account register default --contact "${EMAIL}" --directory https://acme-v02.api.letsencrypt.org/directory
                 fi
-            else
-                echo "Warning: Could not obtain certificate. Ensure DNS points to this server."
-                echo "Run manually after reboot: pvenode acme cert order"
-            fi
+
+                # Configure domain for certificate
+                pvenode config set --acme "domains=${LETSENCRYPT_DOMAIN}"
+
+                # Order certificate
+                if pvenode acme cert order 2>/dev/null; then
+                    # Setup auto-renewal cron
+                    if ! grep -q "pvenode acme cert renew" /etc/crontab 2>/dev/null; then
+                        echo "0 3 * * * root pvenode acme cert renew --force 2>/dev/null" >> /etc/crontab
+                    fi
+                fi
 LEEOF
-        print_success "Let's Encrypt configured for ${LETSENCRYPT_DOMAIN}"
+        } > /dev/null 2>&1 &
+        show_progress $! "Configuring Let's Encrypt for ${LETSENCRYPT_DOMAIN}"
     fi
 
     print_success "Optional features configuration complete"
