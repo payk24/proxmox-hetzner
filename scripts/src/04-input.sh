@@ -101,27 +101,31 @@ get_system_inputs() {
     echo "IPv6: $MAIN_IPV6"
 
     # Get user input for other configuration with validation
+    # Note: PVE_HOSTNAME is used instead of HOSTNAME to avoid conflict with bash built-in
     if [[ "$NON_INTERACTIVE" == true ]]; then
         # Use defaults or config values in non-interactive mode
-        HOSTNAME="${HOSTNAME:-pve}"
+        PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
         DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
         TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
         EMAIL="${EMAIL:-admin@example.com}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
     else
         while true; do
-            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${HOSTNAME:-pve}" HOSTNAME
-            if validate_hostname "$HOSTNAME"; then
+            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
+            if validate_hostname "$PVE_HOSTNAME"; then
+                echo -e "${CLR_GREEN}✓ Hostname: ${PVE_HOSTNAME}${CLR_RESET}"
                 break
             fi
             echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
         done
 
         read -e -p "Enter domain suffix: " -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
+        echo -e "${CLR_GREEN}✓ Domain suffix: ${DOMAIN_SUFFIX}${CLR_RESET}"
 
         while true; do
-            read -e -p "Enter your timezone : " -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
+            read -e -p "Enter your timezone: " -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
             if validate_timezone "$TIMEZONE"; then
+                echo -e "${CLR_GREEN}✓ Timezone: ${TIMEZONE}${CLR_RESET}"
                 break
             fi
             echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
@@ -130,6 +134,7 @@ get_system_inputs() {
         while true; do
             read -e -p "Enter your email address: " -i "${EMAIL:-admin@example.com}" EMAIL
             if validate_email "$EMAIL"; then
+                echo -e "${CLR_GREEN}✓ Email: ${EMAIL}${CLR_RESET}"
                 break
             fi
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
@@ -138,13 +143,14 @@ get_system_inputs() {
         while true; do
             read -e -p "Enter your private subnet: " -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
             if validate_subnet "$PRIVATE_SUBNET"; then
+                echo -e "${CLR_GREEN}✓ Private subnet: ${PRIVATE_SUBNET}${CLR_RESET}"
                 break
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
         done
     fi
 
-    FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
+    FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
     echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
