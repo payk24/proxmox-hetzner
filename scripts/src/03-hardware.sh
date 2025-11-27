@@ -38,22 +38,22 @@ show_system_status() {
     echo -e "${CLR_BLUE}┌─────────────────────────────────────────────────────┐${CLR_RESET}"
     echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}System Information${CLR_RESET}                                 ${CLR_BLUE}│${CLR_RESET}"
     echo -e "${CLR_BLUE}├───────────────────┬─────────────────────────────────┤${CLR_RESET}"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
     echo -e "${CLR_BLUE}├───────────────────┴─────────────────────────────────┤${CLR_RESET}"
     echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}Storage${CLR_RESET}                                            ${CLR_BLUE}│${CLR_RESET}"
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
 
     if [ $nvme_error -eq 1 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-53s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-30s${CLR_BLUE}│${CLR_RESET}\n" \
-                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}"
+            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-31s${CLR_BLUE}│${CLR_RESET}\n" \
+                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:31}"
         done
     fi
 
