@@ -159,11 +159,13 @@ DEFLOCEOF
     remote_exec "systemctl enable chrony && systemctl start chrony"
 
     # Configure dynamic MOTD
-    print_info "Configuring dynamic MOTD..."
-    remote_exec "rm -f /etc/motd"
-    remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
-    remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
-    remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
+    (
+        remote_exec "rm -f /etc/motd"
+        remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
+        remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
+        remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Configuring dynamic MOTD"
 
     # Configure Unattended Upgrades (security updates, kernel excluded)
     remote_exec_with_progress "Installing and configuring Unattended Upgrades" '
@@ -175,19 +177,16 @@ DEFLOCEOF
     remote_exec "systemctl enable unattended-upgrades"
 
     # Configure nf_conntrack
-    print_info "Configuring nf_conntrack..."
-    remote_exec_script << 'CONNTRACKEOF'
-        # Add nf_conntrack module to load at boot
+    remote_exec_with_progress "Configuring nf_conntrack" '
         if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
             echo "nf_conntrack" >> /etc/modules
         fi
 
-        # Configure connection tracking limits
         if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
             echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
             echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
-CONNTRACKEOF
+    '
 
     # Configure CPU governor
     remote_exec_with_progress "Configuring CPU governor" '
@@ -201,13 +200,12 @@ CONNTRACKEOF
     '
 
     # Remove Proxmox subscription notice
-    print_info "Removing Proxmox subscription notice..."
-    remote_exec_script << 'SUBEOF'
+    remote_exec_with_progress "Removing Proxmox subscription notice" '
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
         fi
-SUBEOF
+    '
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -231,19 +229,24 @@ SUBEOF
 
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            print_info "Authenticating Tailscale with provided auth key..."
-            remote_exec "$TAILSCALE_UP_CMD"
+            (
+                remote_exec "$TAILSCALE_UP_CMD"
+                remote_exec "tailscale ip -4" > /tmp/tailscale_ip.txt 2>/dev/null
+                remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " > /tmp/tailscale_hostname.txt 2>/dev/null
+            ) > /dev/null 2>&1 &
+            show_progress $! "Authenticating Tailscale"
 
             # Get Tailscale IP and hostname for display
-            TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
-            TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            print_success "Tailscale authenticated. IP: ${TAILSCALE_IP}"
+            TAILSCALE_IP=$(cat /tmp/tailscale_ip.txt 2>/dev/null || echo "pending")
+            TAILSCALE_HOSTNAME=$(cat /tmp/tailscale_hostname.txt 2>/dev/null || echo "")
+            rm -f /tmp/tailscale_ip.txt /tmp/tailscale_hostname.txt
+            # Overwrite completion line with IP
+            printf "\033[1A\r${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}                              \n"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                print_info "Configuring Tailscale Serve for Proxmox Web UI..."
-                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" >/dev/null 2>&1
-                print_success "Proxmox Web UI available via Tailscale Serve"
+                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" > /dev/null 2>&1 &
+                show_progress $! "Configuring Tailscale Serve" "Proxmox Web UI available via Tailscale Serve"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -256,21 +259,17 @@ SUBEOF
     fi
 
     # Deploy SSH hardening LAST (after all other operations)
-    print_info "Deploying SSH hardening..."
-
-    # Deploy SSH public key FIRST (before disabling password auth!)
-    remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-    remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-    remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-
-    print_success "Security hardening configured"
+    (
+        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Deploying SSH hardening" "Security hardening configured"
 
     # Power off the VM
-    print_info "Powering off the VM..."
-    remote_exec "poweroff" || true
+    remote_exec "poweroff" > /dev/null 2>&1 &
+    show_progress $! "Powering off the VM"
 
     # Wait for QEMU to exit
-    print_info "Waiting for QEMU process to exit..."
-    wait $QEMU_PID || true
-    print_success "QEMU process exited"
+    wait_with_progress "Waiting for QEMU process to exit" 120 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"
 }
