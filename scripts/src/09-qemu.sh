@@ -11,10 +11,8 @@ setup_qemu_config() {
     # UEFI configuration
     if is_uefi_mode; then
         UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        print_info "UEFI mode detected"
     else
         UEFI_OPTS=""
-        print_info "Legacy BIOS mode"
     fi
 
     # CPU and RAM configuration
@@ -44,12 +42,11 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)"
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed"
 }
 
 # Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
-    print_success "Booting installed Proxmox with SSH port forwarding..."
     setup_qemu_config
 
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
@@ -62,5 +59,5 @@ boot_proxmox_with_port_forwarding() {
     QEMU_PID=$!
 
     # Wait for SSH with progress indicator (timeout 5 minutes)
-    wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
+    wait_with_progress "Booting installed Proxmox" 300 "(echo >/dev/tcp/localhost/5555)" 3 "Proxmox booted, SSH available"
 }

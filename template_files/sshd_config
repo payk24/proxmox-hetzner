@@ -34,8 +34,9 @@ PermitEmptyPasswords no
 ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 
-# Disable PAM (not needed with key-only auth)
-UsePAM no
+# Enable PAM for session management (MOTD, limits, accounting)
+# This is safe with key-only auth - PAM won't handle authentication
+UsePAM yes
 
 # ------------------------------------------
 # Security: Additional hardening

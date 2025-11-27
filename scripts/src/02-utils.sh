@@ -86,6 +86,7 @@ SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 show_progress() {
     local pid=$1
     local message="${2:-Processing}"
+    local done_message="${3:-$message}"
     local i=0
 
     while kill -0 "$pid" 2>/dev/null; do
@@ -93,7 +94,7 @@ show_progress() {
         sleep 0.2
     done
 
-    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
+    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
 }
 
 # Wait for condition with progress
@@ -102,6 +103,7 @@ wait_with_progress() {
     local timeout="$2"
     local check_cmd="$3"
     local interval="${4:-5}"
+    local done_message="${5:-$message}"
     local start_time=$(date +%s)
     local i=0
 
@@ -109,7 +111,7 @@ wait_with_progress() {
         local elapsed=$(($(date +%s) - start_time))
 
         if eval "$check_cmd" 2>/dev/null; then
-            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
+            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
             return 0
         fi
 
