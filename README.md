@@ -102,8 +102,6 @@ After installation completes:
    - Username: `root`
    - Password: *the password you set during installation*
 
-> You can also refer to the `notes.txt` file (downloaded during installation) for additional useful information.
-
 ### Tailscale Remote Access (Optional)
 
 If you enabled Tailscale during installation, you can access your server securely from anywhere:
