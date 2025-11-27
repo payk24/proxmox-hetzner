@@ -701,45 +701,29 @@ show_system_status() {
         sys_rows+="[ERROR]|KVM|Not available"
     fi
 
-    # Build storage rows
+    # Build storage rows (Mode will be selected interactively in get_system_inputs)
     local storage_rows=""
     if [ $nvme_error -eq 1 ]; then
-        storage_rows="[ERROR]|No NVMe drives detected!"
+        storage_rows="[ERROR]|No NVMe drives detected!|"
     else
         for i in "${!drive_names[@]}"; do
-            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"$'\n'
+            # Format: [OK] name "size  model" - combined for alignment with sys_rows
+            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}  ${drive_models[$i]:0:25}"
+            # Add newline only if not the last item
+            if [ $i -lt $((${#drive_names[@]} - 1)) ]; then
+                storage_rows+=$'\n'
+            fi
         done
-        # Add empty line and mode
-        storage_rows+=$'\n'
-        case "$ZFS_RAID" in
-            single)
-                storage_rows+="[WARN]|Mode: ZFS Single (no redundancy)"
-                ;;
-            raid0)
-                storage_rows+="[WARN]|Mode: ZFS RAID-0 (stripe, no redundancy)"
-                ;;
-            raid1)
-                storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
-                ;;
-            raid10)
-                storage_rows+="[OK]|Mode: ZFS RAID-10 (stripe+mirror)"
-                ;;
-            raidz*)
-                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID^^}"
-                ;;
-            *)
-                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID}"
-                ;;
-        esac
     fi
 
-    # Display with boxes and colorize
+    # Display with boxes and colorize - combine all rows for uniform column alignment
     {
         echo "SYSTEM INFORMATION"
-        echo "$sys_rows" | column -t -s '|'
-        echo ""
-        echo "--- Storage ---"
-        echo "$storage_rows" | column -t -s '|'
+        {
+            echo "$sys_rows"
+            echo "|--- Storage ---|"
+            echo "$storage_rows"
+        } | column -t -s '|'
     } | boxes -d stone -p a1 | colorize_status
     echo ""
 
@@ -913,35 +897,95 @@ get_system_inputs() {
 
         # ZFS RAID mode selection (only if 2+ drives detected)
         if [ "${NVME_COUNT:-0}" -ge 2 ]; then
-            echo ""
-            echo -e "${CLR_CYAN}┌─ ZFS Storage Mode ─────────────────────────────┐${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}1)${CLR_RESET} raid1  - Mirror ${CLR_GREEN}(recommended)${CLR_RESET}          ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ Redundancy, survives 1 disk failure   ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}2)${CLR_RESET} raid0  - Stripe                         ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, 2x space & speed      ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}3)${CLR_RESET} single - Use first drive only           ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, ignores other drives ${CLR_CYAN}│${CLR_RESET}"
-            echo -e "${CLR_CYAN}└────────────────────────────────────────────────┘${CLR_RESET}"
+            # Interactive radio-button style ZFS mode selector
+            local options=("raid1" "raid0" "single")
+            local labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
+            local descriptions=("Survives 1 disk failure" "2x space & speed, data loss if any disk fails" "Uses first drive only, ignores other drives")
+            local selected=0
+            local key=""
+            local box_lines=0
 
-            local zfs_choice
+            # Hide cursor
+            tput civis
+
+            # Function to draw the selection box using boxes
+            draw_zfs_menu() {
+                local content=""
+                for i in "${!options[@]}"; do
+                    if [ $i -eq $selected ]; then
+                        content+="[*]|${labels[$i]}"$'\n'
+                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                    else
+                        content+="[ ]|${labels[$i]}"$'\n'
+                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                    fi
+                done
+                # Remove trailing newline
+                content="${content%$'\n'}"
+
+                {
+                    echo "ZFS Storage Mode (↑/↓ select, Enter confirm)"
+                    echo "$content" | column -t -s '|'
+                } | boxes -d stone -p a1
+            }
+
+            # Count lines in the box for clearing later
+            box_lines=$(draw_zfs_menu | wc -l)
+
+            # Save cursor position
+            tput sc
+
             while true; do
-                read -e -p "Select ZFS mode [1-3]: " -i "1" zfs_choice
-                case "$zfs_choice" in
-                    1) ZFS_RAID="raid1"; break ;;
-                    2) ZFS_RAID="raid0"; break ;;
-                    3) ZFS_RAID="single"; break ;;
-                    *) echo -e "${CLR_RED}Invalid choice. Enter 1, 2, or 3.${CLR_RESET}" ;;
-                esac
+                # Move cursor to saved position
+                tput rc
+
+                # Draw the menu with colors
+                draw_zfs_menu | sed -e "s/\[\*\]/${CLR_GREEN}[●]${CLR_RESET}/g" \
+                                    -e "s/\[ \]/${CLR_BLUE}[○]${CLR_RESET}/g"
+
+                # Read a single keypress
+                IFS= read -rsn1 key
+
+                # Check for escape sequence (arrow keys)
+                if [[ "$key" == $'\x1b' ]]; then
+                    read -rsn2 -t 0.1 key
+                    case "$key" in
+                        '[A') # Up arrow
+                            ((selected--))
+                            [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
+                            ;;
+                        '[B') # Down arrow
+                            ((selected++))
+                            [ $selected -ge ${#options[@]} ] && selected=0
+                            ;;
+                    esac
+                elif [[ "$key" == "" ]]; then
+                    # Enter pressed - confirm selection
+                    break
+                elif [[ "$key" == "1" ]]; then
+                    selected=0; break
+                elif [[ "$key" == "2" ]]; then
+                    selected=1; break
+                elif [[ "$key" == "3" ]]; then
+                    selected=2; break
+                fi
             done
 
-            # Show confirmation with checkmark
-            local mode_desc
-            case "$ZFS_RAID" in
-                raid1)  mode_desc="RAID-1 (mirror)" ;;
-                raid0)  mode_desc="RAID-0 (stripe)" ;;
-                single) mode_desc="Single drive" ;;
-            esac
-            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${mode_desc}\033[K\n"
+            # Show cursor again
+            tput cnorm
+
+            # Set the selected ZFS RAID mode
+            ZFS_RAID="${options[$selected]}"
+
+            # Clear the selection box completely
+            tput rc
+            for ((i=0; i<box_lines; i++)); do
+                printf "\033[K\n"
+            done
+            tput rc
+
+            # Show confirmation
+            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${labels[$selected]}"
         fi
     fi
 
