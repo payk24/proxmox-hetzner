@@ -133,6 +133,10 @@ configure_base_system() {
         cat > /root/.zshrc << '\''ZSHRC'\''
 # Proxmox ZSH Configuration
 
+# Locale
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
 # History settings
 HISTFILE=~/.zsh_history
 HISTSIZE=10000
@@ -211,6 +215,10 @@ ZSHRC
         sed -i "s/# ru_RU.UTF-8/ru_RU.UTF-8/" /etc/locale.gen
         locale-gen
         update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+        # Set locale in /etc/environment for all sessions
+        grep -q "LANG=" /etc/environment || echo "LANG=en_US.UTF-8" >> /etc/environment
+        grep -q "LC_ALL=" /etc/environment || echo "LC_ALL=en_US.UTF-8" >> /etc/environment
     '
 
     # Configure CPU governor
