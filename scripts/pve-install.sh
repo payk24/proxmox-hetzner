@@ -137,29 +137,61 @@ echo -e "${CLR_GREEN}Starting Proxmox auto-installation...${CLR_RESET}"
 
 # Function to get user input
 get_system_inputs() {
-    # Get default interface name and available alternative names first
-    DEFAULT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-    if [ -z "$DEFAULT_INTERFACE" ]; then
-        DEFAULT_INTERFACE=$(udevadm info -e | grep -m1 -A 20 ^P.*eth0 | grep ID_NET_NAME_PATH | cut -d'=' -f2)
+    # Get default interface name (the one with default route)
+    CURRENT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+    if [ -z "$CURRENT_INTERFACE" ]; then
+        CURRENT_INTERFACE="eth0"
     fi
-    
-    # Get all available interfaces and their altnames
+
+    # CRITICAL: Get the predictable interface name for bare metal
+    # Rescue System often uses eth0, but Proxmox uses predictable naming (enp0s4, eno1, etc.)
+    # We must use the predictable name in the config, otherwise network won't work after reboot
+    PREDICTABLE_NAME=""
+
+    # Try to get predictable name from udev
+    if [ -e "/sys/class/net/${CURRENT_INTERFACE}" ]; then
+        # Try ID_NET_NAME_PATH first (most reliable for PCIe devices)
+        PREDICTABLE_NAME=$(udevadm info "/sys/class/net/${CURRENT_INTERFACE}" 2>/dev/null | grep "ID_NET_NAME_PATH=" | cut -d'=' -f2)
+
+        # Fallback to ID_NET_NAME_ONBOARD (for onboard NICs)
+        if [ -z "$PREDICTABLE_NAME" ]; then
+            PREDICTABLE_NAME=$(udevadm info "/sys/class/net/${CURRENT_INTERFACE}" 2>/dev/null | grep "ID_NET_NAME_ONBOARD=" | cut -d'=' -f2)
+        fi
+
+        # Fallback to altname from ip link
+        if [ -z "$PREDICTABLE_NAME" ]; then
+            PREDICTABLE_NAME=$(ip -d link show "$CURRENT_INTERFACE" 2>/dev/null | grep "altname" | awk '{print $2}' | head -1)
+        fi
+    fi
+
+    # Use predictable name if found, otherwise fall back to current interface name
+    if [ -n "$PREDICTABLE_NAME" ]; then
+        DEFAULT_INTERFACE="$PREDICTABLE_NAME"
+        echo -e "${CLR_GREEN}Detected predictable interface name: ${PREDICTABLE_NAME} (current: ${CURRENT_INTERFACE})${CLR_RESET}"
+    else
+        DEFAULT_INTERFACE="$CURRENT_INTERFACE"
+        echo -e "${CLR_YELLOW}Warning: Could not detect predictable name, using: ${CURRENT_INTERFACE}${CLR_RESET}"
+    fi
+
+    # Get all available interfaces and their altnames for display
     AVAILABLE_ALTNAMES=$(ip -d link show | grep -v "lo:" | grep -E '(^[0-9]+:|altname)' | awk '/^[0-9]+:/ {interface=$2; gsub(/:/, "", interface); printf "%s", interface} /altname/ {printf ", %s", $2} END {print ""}' | sed 's/, $//')
-    
+
     # Set INTERFACE_NAME to default if not already set
     if [ -z "$INTERFACE_NAME" ]; then
         INTERFACE_NAME="$DEFAULT_INTERFACE"
     fi
-    
+
     # Prompt user for interface name
+    echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
     read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
-    
-    # Now get network information based on the selected interface
-    MAIN_IPV4_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet " | xargs | cut -d" " -f2)
+
+    # Get network information from the CURRENT interface (the one active in Rescue)
+    # but use INTERFACE_NAME (predictable name) for the Proxmox configuration
+    MAIN_IPV4_CIDR=$(ip address show "$CURRENT_INTERFACE" | grep global | grep "inet " | xargs | cut -d" " -f2)
     MAIN_IPV4=$(echo "$MAIN_IPV4_CIDR" | cut -d'/' -f1)
     MAIN_IPV4_GW=$(ip route | grep default | xargs | cut -d" " -f3)
-    MAC_ADDRESS=$(ip link show "$INTERFACE_NAME" | awk '/ether/ {print $2}')
-    IPV6_CIDR=$(ip address show "$INTERFACE_NAME" | grep global | grep "inet6 " | xargs | cut -d" " -f2)
+    MAC_ADDRESS=$(ip link show "$CURRENT_INTERFACE" | awk '/ether/ {print $2}')
+    IPV6_CIDR=$(ip address show "$CURRENT_INTERFACE" | grep global | grep "inet6 " | xargs | cut -d" " -f2)
     MAIN_IPV6=$(echo "$IPV6_CIDR" | cut -d'/' -f1)
 
     # Set a default value for FIRST_IPV6_CIDR even if IPV6_CIDR is empty
@@ -171,7 +203,8 @@ get_system_inputs() {
 
     # Display detected information
     echo -e "${CLR_YELLOW}Detected Network Information:${CLR_RESET}"
-    echo "Interface Name: $INTERFACE_NAME"
+    echo "Current Interface (Rescue): $CURRENT_INTERFACE"
+    echo "Config Interface (Proxmox): $INTERFACE_NAME"
     echo "Main IPv4 CIDR: $MAIN_IPV4_CIDR"
     echo "Main IPv4: $MAIN_IPV4"
     echo "Main IPv4 Gateway: $MAIN_IPV4_GW"
@@ -740,31 +773,9 @@ TAILSCALESERVEEOF
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
-    # Configure UEFI boot order to prioritize disk over PXE
-    # This is critical for Hetzner servers where PXE is often first in boot order
-    echo -e "${CLR_YELLOW}Configuring UEFI boot order...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'EFIEOF'
-        if command -v efibootmgr &> /dev/null; then
-            # Get all boot entries for disks (UEFI OS entries, not PXE or Shell)
-            DISK_ENTRIES=$(efibootmgr | grep -E "UEFI OS|proxmox|debian|linux" -i | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
-            # Get PXE and other entries
-            OTHER_ENTRIES=$(efibootmgr | grep -E "PXE|Shell|Network" -i | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
-
-            if [ -n "$DISK_ENTRIES" ]; then
-                # Build new boot order: disks first, then others
-                if [ -n "$OTHER_ENTRIES" ]; then
-                    NEW_ORDER="${DISK_ENTRIES},${OTHER_ENTRIES}"
-                else
-                    NEW_ORDER="${DISK_ENTRIES}"
-                fi
-                efibootmgr -o "$NEW_ORDER" 2>/dev/null && echo "UEFI boot order configured: disk first, PXE second" || echo "Warning: Could not set boot order"
-            else
-                echo "Warning: No disk boot entries found, boot order unchanged"
-            fi
-        else
-            echo "efibootmgr not available, skipping boot order configuration"
-        fi
-EFIEOF
+    # NOTE: UEFI boot order must be configured from the Rescue System (not inside QEMU)
+    # because QEMU uses virtual OVMF firmware, not the physical server's UEFI.
+    # The configure_uefi_boot_order() function handles this after QEMU exits.
 
     # Power off the VM BEFORE restarting sshd (while password auth still works)
     # This ensures we can connect and poweroff the VM
@@ -775,6 +786,115 @@ EFIEOF
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
     echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
+}
+
+# Configure UEFI boot order from Rescue System (affects physical UEFI firmware)
+# This must run AFTER QEMU exits and BEFORE rebooting to the installed OS
+configure_uefi_boot_order() {
+    echo -e "${CLR_YELLOW}Configuring UEFI boot order on physical server...${CLR_RESET}"
+
+    # Check if we're in UEFI mode
+    if ! is_uefi_mode; then
+        echo -e "${CLR_YELLOW}Not in UEFI mode, skipping boot order configuration.${CLR_RESET}"
+        return 0
+    fi
+
+    # Install efibootmgr if not available
+    if ! command -v efibootmgr &> /dev/null; then
+        echo -e "${CLR_YELLOW}Installing efibootmgr...${CLR_RESET}"
+        apt-get update -qq && apt-get install -y -qq efibootmgr
+    fi
+
+    # Find the EFI System Partition on the first NVMe drive
+    # Proxmox ZFS installer creates partition 2 as EFI System Partition
+    ESP_PARTITION="${NVME_DRIVE_1}p2"
+    if [ ! -b "$ESP_PARTITION" ]; then
+        # Try without 'p' for non-NVMe drives
+        ESP_PARTITION="${NVME_DRIVE_1}2"
+    fi
+
+    if [ ! -b "$ESP_PARTITION" ]; then
+        echo -e "${CLR_RED}Could not find EFI System Partition. Boot order not configured.${CLR_RESET}"
+        return 1
+    fi
+
+    echo -e "${CLR_YELLOW}Found EFI partition: ${ESP_PARTITION}${CLR_RESET}"
+
+    # Create mount point and mount ESP
+    MOUNT_POINT="/tmp/esp_mount"
+    mkdir -p "$MOUNT_POINT"
+    mount "$ESP_PARTITION" "$MOUNT_POINT"
+
+    # Find the bootloader - Proxmox uses systemd-boot
+    BOOTLOADER=""
+    if [ -f "$MOUNT_POINT/EFI/systemd/systemd-bootx64.efi" ]; then
+        BOOTLOADER="\\EFI\\systemd\\systemd-bootx64.efi"
+        BOOTLOADER_PATH="/EFI/systemd/systemd-bootx64.efi"
+    elif [ -f "$MOUNT_POINT/EFI/BOOT/BOOTX64.EFI" ]; then
+        BOOTLOADER="\\EFI\\BOOT\\BOOTX64.EFI"
+        BOOTLOADER_PATH="/EFI/BOOT/BOOTX64.EFI"
+    elif [ -f "$MOUNT_POINT/EFI/proxmox/shimx64.efi" ]; then
+        BOOTLOADER="\\EFI\\proxmox\\shimx64.efi"
+        BOOTLOADER_PATH="/EFI/proxmox/shimx64.efi"
+    fi
+
+    # List what's in EFI directory for debugging
+    echo -e "${CLR_YELLOW}EFI directory contents:${CLR_RESET}"
+    ls -la "$MOUNT_POINT/EFI/" 2>/dev/null || true
+
+    umount "$MOUNT_POINT"
+    rmdir "$MOUNT_POINT"
+
+    if [ -z "$BOOTLOADER" ]; then
+        echo -e "${CLR_RED}Could not find bootloader in ESP. Boot order not configured.${CLR_RESET}"
+        return 1
+    fi
+
+    echo -e "${CLR_YELLOW}Found bootloader: ${BOOTLOADER_PATH}${CLR_RESET}"
+
+    # Get the disk identifier for efibootmgr (e.g., /dev/nvme0n1)
+    DISK="$NVME_DRIVE_1"
+    PART_NUM=2  # EFI partition is typically partition 2
+
+    # Check current boot entries
+    echo -e "${CLR_YELLOW}Current UEFI boot entries:${CLR_RESET}"
+    efibootmgr -v 2>/dev/null || efibootmgr
+
+    # Remove any existing "Proxmox" boot entries to avoid duplicates
+    for entry in $(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}"); do
+        efibootmgr -b "$entry" -B 2>/dev/null || true
+    done
+
+    # Create new boot entry for Proxmox
+    echo -e "${CLR_YELLOW}Creating Proxmox boot entry...${CLR_RESET}"
+    efibootmgr -c -d "$DISK" -p "$PART_NUM" -L "Proxmox VE" -l "$BOOTLOADER"
+
+    # Get the new Proxmox boot entry number
+    PROXMOX_ENTRY=$(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | head -1)
+
+    if [ -n "$PROXMOX_ENTRY" ]; then
+        # Get all other entries (PXE, Shell, etc.)
+        OTHER_ENTRIES=$(efibootmgr | grep -E "Boot[0-9A-F]{4}" | grep -v -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
+
+        # Set boot order: Proxmox first, then others
+        if [ -n "$OTHER_ENTRIES" ]; then
+            NEW_ORDER="${PROXMOX_ENTRY},${OTHER_ENTRIES}"
+        else
+            NEW_ORDER="${PROXMOX_ENTRY}"
+        fi
+
+        echo -e "${CLR_YELLOW}Setting boot order: ${NEW_ORDER}${CLR_RESET}"
+        efibootmgr -o "$NEW_ORDER"
+
+        echo -e "${CLR_GREEN}UEFI boot order configured: Proxmox first${CLR_RESET}"
+    else
+        echo -e "${CLR_RED}Failed to create Proxmox boot entry.${CLR_RESET}"
+        return 1
+    fi
+
+    # Show final boot configuration
+    echo -e "${CLR_YELLOW}Final UEFI boot configuration:${CLR_RESET}"
+    efibootmgr
 }
 
 # Function to reboot into the main OS
@@ -846,6 +966,9 @@ boot_proxmox_with_port_forwarding || {
 
 # Configure Proxmox via SSH
 configure_proxmox_via_ssh
+
+# Configure UEFI boot order from Rescue System (physical UEFI firmware)
+configure_uefi_boot_order
 
 # Reboot to the main OS
 reboot_to_main_os
