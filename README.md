@@ -123,27 +123,6 @@ tailscale serve --bg --https=443 https://127.0.0.1:8006
 
 > Get your Tailscale auth key from: https://login.tailscale.com/admin/settings/keys
 
-## 📚 Additional Resources
-
-### Project Documentation
-- [ReadMe-v1.md](https://github.com/payk24/proxmox-hetzner/blob/main/README-v1.md)
-- [ReadMe-v2.md](https://github.com/payk24/proxmox-hetzner/blob/main/README-v2.md)
-
-### Related Resources
-- [tteck's Proxmox Helper Scripts](https://tteck.github.io/Proxmox/)
-- [extremeshok's Proxmox Tools](https://github.com/extremeshok/xshok-proxmox)
-- [Hetzner-specific Proxmox Tools](https://github.com/extremeshok/xshok-proxmox/tree/master/hetzner)
-- [Proxmox Post-Installation Guide](https://88plug.com/linux/what-to-do-after-you-install-proxmox/)
-- [Proxmox Subscription Notice Removal](https://gist.github.com/gushmazuko/9208438b7be6ac4e6476529385047bbb)
-- [Proxmox Hetzner Autoconfiguration](https://github.com/johnknott/proxmox-hetzner-autoconfigure)
-- [Alternative Proxmox Hetzner Setup](https://github.com/CasCas2/proxmox-hetzner)
-- [Hetzner Proxmox Configuration](https://github.com/west17m/hetzner-proxmox)
-- [Hetzner Proxmox NAT Setup](https://github.com/SOlangsam/hetzner-proxmox-nat)
-- [Proxmox Starter Guide](https://github.com/HoleInTheSeat/ProxmoxStater)
-- [Proxmox IPTables for Hetzner](https://github.com/rloyaute/proxmox-iptables-hetzner)
-- [Firewalld on Debian Guide](https://computingforgeeks.com/how-to-install-and-configure-firewalld-on-debian/)
-- [Proxmox Firewall Configuration Guide](https://www.virtualizationhowto.com/2022/10/proxmox-firewall-rules-configuration/)
-
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
