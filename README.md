@@ -96,6 +96,53 @@ bash pve-install.sh -c proxmox.conf
 bash pve-install.sh -c proxmox.conf -n
 ```
 
+### Environment Variables
+
+You can pre-configure any setting via environment variables. In **interactive mode**, pre-set variables will be skipped (shown with checkmark). In **non-interactive mode** (`-n`), they provide required values.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PVE_HOSTNAME` | Server hostname | `pve` | No |
+| `DOMAIN_SUFFIX` | Domain suffix for FQDN | `local` | No |
+| `TIMEZONE` | System timezone | `Europe/Kyiv` | No |
+| `EMAIL` | Admin email | `admin@example.com` | No |
+| `NEW_ROOT_PASSWORD` | Root password | - | **Yes** (non-interactive) |
+| `SSH_PUBLIC_KEY` | SSH public key | From rescue system | **Yes** (non-interactive) |
+| `INTERFACE_NAME` | Network interface | Auto-detected | No |
+| `BRIDGE_MODE` | Network mode: `internal`, `external`, `both` | `internal` | No |
+| `PRIVATE_SUBNET` | NAT subnet (CIDR) | `10.0.0.0/24` | No |
+| `ZFS_RAID` | ZFS mode: `single`, `raid0`, `raid1` | `raid1` (2+ disks) | No |
+| `INSTALL_TAILSCALE` | Install Tailscale: `yes`, `no` | `no` | No |
+| `TAILSCALE_AUTH_KEY` | Tailscale auth key | - | No |
+| `TAILSCALE_SSH` | Enable Tailscale SSH | `yes` | No |
+| `TAILSCALE_WEBUI` | Enable Tailscale Web UI | `yes` | No |
+
+#### Examples with Environment Variables
+
+```bash
+# Semi-interactive: only password from env, rest interactive
+export NEW_ROOT_PASSWORD="MySecurePass123"
+bash pve-install.sh
+
+# Multiple pre-configured values
+export NEW_ROOT_PASSWORD="MySecurePass123"
+export PVE_HOSTNAME="proxmox1"
+export TIMEZONE="Europe/Berlin"
+export INSTALL_TAILSCALE="yes"
+export TAILSCALE_AUTH_KEY="tskey-auth-xxx"
+bash pve-install.sh
+
+# Fully automated with env vars (no config file needed)
+export NEW_ROOT_PASSWORD="MySecurePass123"
+export SSH_PUBLIC_KEY="ssh-ed25519 AAAA... user@host"
+bash pve-install.sh -n
+
+# Inline (single command)
+NEW_ROOT_PASSWORD="pass" SSH_PUBLIC_KEY="ssh-ed25519 ..." bash pve-install.sh -n
+```
+
+> **Security Tip:** Use environment variables for sensitive data (passwords, auth keys) instead of storing them in config files.
+
 The script will:
 - Download the latest Proxmox VE ISO
 - Create an auto-installation configuration
