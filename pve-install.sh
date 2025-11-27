@@ -172,14 +172,6 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-# =============================================================================
-# Cursor management - ensure cursor is always visible on exit
-# =============================================================================
-cleanup_cursor() {
-    tput cnorm 2>/dev/null || true
-}
-trap cleanup_cursor EXIT INT TERM
-
 clear
 
 # =============================================================================
@@ -1568,8 +1560,8 @@ download_proxmox_iso() {
     ISO_FILENAME=$(basename "$PROXMOX_ISO_URL")
     CHECKSUM_URL="https://enterprise.proxmox.com/iso/SHA256SUMS"
 
-    # Download ISO with progress spinner (silent wget)
-    wget -q -O pve.iso "$PROXMOX_ISO_URL" 2>/dev/null &
+    # Download ISO with progress bar
+    wget -q --show-progress -O pve.iso "$PROXMOX_ISO_URL" 2>&1 &
     show_progress $! "Downloading $ISO_FILENAME"
     wait $!
     if [[ $? -ne 0 ]]; then
@@ -1655,8 +1647,9 @@ EOF
 }
 
 make_autoinstall_iso() {
-    proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso > /dev/null 2>&1 &
-    show_progress $! "Creating autoinstall ISO"
+    print_info "Making autoinstall.iso..."
+    proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso
+    print_success "pve-autoinstall.iso created"
 }
 
 # --- 09-qemu.sh ---
