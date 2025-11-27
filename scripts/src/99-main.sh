@@ -53,9 +53,18 @@ reboot_to_main_os() {
         fi
     fi
 
+    # Display ASCII art header (centered for MENU_BOX_WIDTH=60)
+    echo ""
+    echo '      ___                      _      _         _ _'
+    echo '     / __|___ _ __  _ __  ___ | |__ _| |_ ___  | | |'
+    echo '    | (__/ _ \  _ \|  _ \/ _ \| / _` |  _/ -_) |_|_|'
+    echo '     \___\___/_|_|_|| .__/\___/|_\__,_|\__\___|(_|_)'
+    echo '                    |_|'
+    echo ""
+
     # Display with boxes
     {
-        echo "INSTALLATION COMPLETE"
+        echo "INSTALLATION SUMMARY"
         echo "$summary" | column -t -s '|' | while IFS= read -r line; do
             printf "%-${inner_width}s\n" "$line"
         done
