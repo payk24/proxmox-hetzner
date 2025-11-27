@@ -183,7 +183,7 @@ show_system_status() {
     fi
 
     # Display with boxes and colorize
-    # Inner width = MENU_BOX_WIDTH - 4 (borders) - 2 (padding) = 64
+    # Inner width = MENU_BOX_WIDTH - 4 (borders) - 2 (padding) = 54
     local inner_width=$((MENU_BOX_WIDTH - 6))
     {
         echo "SYSTEM INFORMATION"
