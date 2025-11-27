@@ -1,5 +1,10 @@
 # Proxmox ZSH Configuration
 
+# UTF-8 Locale (required for btop and other apps)
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+
 # History settings
 HISTFILE=~/.zsh_history
 HISTSIZE=10000

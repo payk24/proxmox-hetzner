@@ -140,6 +140,13 @@ LANG=en_US.UTF-8
 LC_ALL=en_US.UTF-8
 LANGUAGE=en_US.UTF-8
 DEFLOCEOF
+
+        # Set in /etc/environment for PAM (all sessions including non-login)
+        cat > /etc/environment << "ENVEOF"
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+LANGUAGE=en_US.UTF-8
+ENVEOF
     ' "UTF-8 locales configured"
 
     # Configure ZSH as default shell for root
