@@ -3,8 +3,6 @@
 # =============================================================================
 
 make_template_files() {
-    print_info "Modifying template files..."
-
     print_info "Downloading template files..."
     mkdir -p ./template_files
 
@@ -33,8 +31,9 @@ make_template_files() {
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
+    print_info "Modifying template files..."
+
     # Process hosts file
-    print_info "Processing hosts file..."
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
     sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
@@ -49,8 +48,6 @@ make_template_files() {
     sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
-
-    print_success "Template files modified"
 }
 
 # Configure the installed Proxmox via SSH
