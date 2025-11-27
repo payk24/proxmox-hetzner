@@ -2,67 +2,64 @@
 # Finish and reboot
 # =============================================================================
 
-# Function to reboot into the main OS
-reboot_to_main_os() {
+# Calculate and display total installation time
+show_total_time() {
     local end_time=$(date +%s)
     local total_seconds=$((end_time - INSTALL_START_TIME))
     local duration=$(format_duration $total_seconds)
-
-    echo ""
-    echo -e "${CLR_CYAN}"
-    cat << 'COMPLETE'
-  ___           _        _ _       _   _               ____                      _      _
- |_ _|_ __  ___| |_ __ _| | | __ _| |_(_) ___  _ __   / ___|___  _ __ ___  _ __ | | ___| |_ ___
-  | || '_ \/ __| __/ _` | | |/ _` | __| |/ _ \| '_ \ | |   / _ \| '_ ` _ \| '_ \| |/ _ \ __/ _ \
-  | || | | \__ \ || (_| | | | (_| | |_| | (_) | | | || |__| (_) | | | | | | |_) | |  __/ ||  __/
- |___|_| |_|___/\__\__,_|_|_|\__,_|\__|_|\___/|_| |_| \____\___/|_| |_| |_| .__/|_|\___|\__\___|
-                                                                          |_|
-COMPLETE
-    echo -e "${CLR_RESET}"
     print_success "Total installation time: ${duration}"
+}
+
+# Function to reboot into the main OS
+reboot_to_main_os() {
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    show_total_time
     echo ""
-
-    # Build summary content
-    local summary=""
-    summary+="Security:\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} SSH key deployed, password auth disabled\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} CPU governor: performance\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} Kernel optimized for virtualization\n"
-    summary+="\n"
-    summary+="Installed:\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} btop, iotop, ncdu, tmux, pigz, jq, bat\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} libguestfs-tools, smartmontools\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} ZSH with autosuggestions\n"
+    echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
+    echo "  ✓ SSH public key deployed"
+    echo "  ✓ Password authentication DISABLED"
+    echo "  ✓ CPU governor set to performance"
+    echo "  ✓ Kernel parameters optimized for virtualization"
+    echo "  ✓ Subscription notice removed"
+    echo ""
+    echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
+    echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
+    echo "  ✓ VM image tools: libguestfs-tools"
+    echo "  ✓ ZFS ARC memory limits configured"
+    echo "  ✓ nf_conntrack optimized for high connection counts"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        if [[ -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-            summary+="  ${CLR_GREEN}✓${CLR_RESET} Tailscale (${TAILSCALE_IP})\n"
+        echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            echo "  ✓ Tailscale authenticated (IP: ${TAILSCALE_IP:-pending})"
         else
-            summary+="  ${CLR_YELLOW}⚠${CLR_RESET} Tailscale (needs: tailscale up --ssh)\n"
+            echo "  ⚠ Tailscale needs authentication after reboot:"
+            echo "      tailscale up --ssh"
+            echo "      tailscale serve --bg --https=443 https://127.0.0.1:8006"
         fi
     fi
-    summary+="\n"
-    summary+="Access:\n"
-    summary+="  Web UI:  https://${MAIN_IPV4_CIDR%/*}:8006\n"
-    summary+="  SSH:     ssh root@${MAIN_IPV4_CIDR%/*}"
+    echo ""
+    echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
+    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
+    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
     if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        summary+="\n  TS SSH:  ssh root@${TAILSCALE_IP}"
+        echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
         if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-            summary+="\n  TS Web:  https://${TAILSCALE_HOSTNAME}"
+            echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
         else
-            summary+="\n  TS Web:  https://${TAILSCALE_IP}:8006"
+            echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
         fi
     fi
-
-    echo -e "$summary"
     echo ""
 
     # Ask user to reboot the system
-    read -e -p "Reboot now? (y/n): " -i "y" REBOOT
+    read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
-        print_info "Rebooting..."
+        print_info "Rebooting the system..."
         reboot
     else
-        print_info "Exiting without reboot"
+        print_info "Exiting..."
         exit 0
     fi
 }
