@@ -19,6 +19,11 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 - **Interactive menus** for easy configuration (arrow keys navigation)
 - **Network bridge modes**: Internal NAT, External bridged, or both
 - **ZFS RAID selection**: RAID-1 (mirror), RAID-0 (stripe), or single drive
+- **SSH hardening**: Key-only auth, modern ciphers, secure defaults
+- **Automatic security updates**: Unattended upgrades (kernel excluded)
+- **NTP time sync**: Chrony with Hetzner NTP servers
+- **ZSH shell**: Pre-configured with autosuggestions and syntax highlighting
+- **Dynamic MOTD**: System status on every login
 - Clean progress indicators with spinners for all operations
 - Full logging to file for troubleshooting
 - Pre-flight hardware and connectivity checks
@@ -166,9 +171,10 @@ The script will:
 
 The installation script automatically applies the following optimizations:
 
-**Installed Utilities:**
+**Installed Packages:**
 | Package | Purpose |
 |---------|---------|
+| `zsh` | Modern shell with plugins (autosuggestions, syntax highlighting) |
 | `btop` | Modern system monitor (CPU, RAM, disk, network) |
 | `iotop` | Disk I/O monitoring |
 | `ncdu` | Interactive disk usage analyzer |
@@ -178,15 +184,31 @@ The installation script automatically applies the following optimizations:
 | `jq` | JSON parser (useful for API/scripts) |
 | `bat` | Modern `cat` with syntax highlighting |
 | `libguestfs-tools` | VM image manipulation tools |
+| `chrony` | NTP time synchronization |
+| `unattended-upgrades` | Automatic security updates |
 
-**System Optimizations (applied automatically):**
-- All packages updated to latest versions (`apt dist-upgrade`)
-- ZFS ARC memory limits (dynamically calculated based on system RAM)
-- nf_conntrack optimized for high connection counts (max 1M connections)
-- CPU governor set to performance mode
-- Subscription notice removed
-- Enterprise repositories disabled (no subscription required)
-- Ceph UI hidden (not needed for single-server setup)
+**Security Hardening:**
+| Feature | Configuration |
+|---------|---------------|
+| SSH authentication | Key-only (password disabled) |
+| SSH ciphers | Modern only (ChaCha20, AES-GCM) |
+| SSH limits | Max 3 auth attempts, 30s grace time |
+| Root login | Allowed with key only (`prohibit-password`) |
+| Security updates | Automatic via unattended-upgrades |
+| Kernel updates | Excluded from auto-updates (manual reboot) |
+
+**System Optimizations:**
+| Optimization | Details |
+|--------------|---------|
+| Package updates | All packages updated (`apt dist-upgrade`) |
+| ZFS ARC limits | Dynamically calculated based on system RAM |
+| nf_conntrack | Optimized for 1M+ connections |
+| CPU governor | Set to `performance` mode |
+| NTP sync | Chrony with Hetzner NTP servers |
+| UTF-8 locales | Properly configured for all apps |
+| Dynamic MOTD | System status shown on SSH login |
+| Subscription notice | Removed from web UI |
+| Enterprise repos | Disabled (no subscription required) |
 
 ## ✅ Accessing Your Proxmox Server
 
