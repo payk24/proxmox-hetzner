@@ -981,13 +981,17 @@ show_system_status() {
     fi
 
     # Display with boxes and colorize
+    # Inner width = MENU_BOX_WIDTH - 4 (borders) - 2 (padding) = 64
+    local inner_width=$((MENU_BOX_WIDTH - 6))
     {
         echo "SYSTEM INFORMATION"
         {
             echo "$sys_rows"
             echo "|--- Storage ---|"
             echo "$storage_rows"
-        } | column -t -s '|'
+        } | column -t -s '|' | while IFS= read -r line; do
+            printf "%-${inner_width}s\n" "$line"
+        done
     } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | colorize_status
     echo ""
 
