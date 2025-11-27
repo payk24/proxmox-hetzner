@@ -21,7 +21,7 @@ make_template_files() {
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
-    sed -i "s|{{HOSTNAME}}|$HOSTNAME|g" ./template_files/hosts
+    sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
@@ -53,7 +53,7 @@ configure_proxmox_via_ssh() {
     # Basic system configuration
     remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
-    remote_exec "echo '$HOSTNAME' > /etc/hostname"
+    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
     remote_exec "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits

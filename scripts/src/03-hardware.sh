@@ -49,19 +49,19 @@ show_system_status() {
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
 
     if [ $nvme_error -eq 1 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-8s  %5s  %-28s  ${CLR_BLUE}│${CLR_RESET}\n" \
-                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:28}"
+            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-30s${CLR_BLUE}│${CLR_RESET}\n" \
+                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}"
         done
     fi
 
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
     if [ "$RAID_MODE" = "single" ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
     else
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
     fi
     echo -e "${CLR_BLUE}└─────────────────────────────────────────────────────┘${CLR_RESET}"
     echo ""

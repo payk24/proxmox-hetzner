@@ -132,7 +132,7 @@ save_config() {
 INTERFACE_NAME="${INTERFACE_NAME}"
 
 # System
-HOSTNAME="${HOSTNAME}"
+PVE_HOSTNAME="${PVE_HOSTNAME}"
 DOMAIN_SUFFIX="${DOMAIN_SUFFIX}"
 TIMEZONE="${TIMEZONE}"
 EMAIL="${EMAIL}"
@@ -551,19 +551,19 @@ show_system_status() {
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
 
     if [ $nvme_error -eq 1 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-8s  %5s  %-28s  ${CLR_BLUE}│${CLR_RESET}\n" \
-                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:28}"
+            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-30s${CLR_BLUE}│${CLR_RESET}\n" \
+                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}"
         done
     fi
 
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
     if [ "$RAID_MODE" = "single" ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
     else
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
     fi
     echo -e "${CLR_BLUE}└─────────────────────────────────────────────────────┘${CLR_RESET}"
     echo ""
@@ -691,17 +691,18 @@ get_system_inputs() {
     echo "IPv6: $MAIN_IPV6"
 
     # Get user input for other configuration with validation
+    # Note: PVE_HOSTNAME is used instead of HOSTNAME to avoid conflict with bash built-in
     if [[ "$NON_INTERACTIVE" == true ]]; then
         # Use defaults or config values in non-interactive mode
-        HOSTNAME="${HOSTNAME:-pve}"
+        PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
         DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
         TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
         EMAIL="${EMAIL:-admin@example.com}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
     else
         while true; do
-            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${HOSTNAME:-pve}" HOSTNAME
-            if validate_hostname "$HOSTNAME"; then
+            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
+            if validate_hostname "$PVE_HOSTNAME"; then
                 break
             fi
             echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
@@ -734,7 +735,7 @@ get_system_inputs() {
         done
     fi
 
-    FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
+    FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
     echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
@@ -1114,7 +1115,7 @@ make_template_files() {
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
-    sed -i "s|{{HOSTNAME}}|$HOSTNAME|g" ./template_files/hosts
+    sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
@@ -1146,7 +1147,7 @@ configure_proxmox_via_ssh() {
     # Basic system configuration
     remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
-    remote_exec "echo '$HOSTNAME' > /etc/hostname"
+    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
     remote_exec "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits
