@@ -704,15 +704,13 @@ show_system_status() {
         for i in "${!drive_names[@]}"; do
             storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"$'\n'
         done
-        storage_rows="${storage_rows%$'\n'}"
-    fi
-
-    # Build RAID mode line
-    local raid_line
-    if [ "$RAID_MODE" = "single" ]; then
-        raid_line="[WARN]  Mode: Single Drive (no RAID)"
-    else
-        raid_line="[OK]    Mode: ZFS RAID-1 (mirror)"
+        # Add empty line and mode
+        storage_rows+=$'\n'
+        if [ "$RAID_MODE" = "single" ]; then
+            storage_rows+="[WARN]|Mode: ZFS Single Drive (no RAID)"
+        else
+            storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
+        fi
     fi
 
     # Display with boxes and colorize
@@ -723,8 +721,6 @@ show_system_status() {
         echo ""
         echo "--- Storage ---"
         echo "$storage_rows" | column -t -s '|'
-        echo ""
-        echo "$raid_line"
     } | boxes -d stone -p a1 | colorize_status
     echo ""
 
