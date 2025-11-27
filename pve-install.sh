@@ -1073,7 +1073,7 @@ get_system_inputs() {
                 echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
                 NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             done
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********"
+            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********\033[K\n"
         fi
 
         # =====================================================================
