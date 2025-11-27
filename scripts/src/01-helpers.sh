@@ -33,7 +33,8 @@ read_password() {
     local password=""
     local char=""
 
-    echo -n "$prompt"
+    # Output prompt to stderr so it's visible when stdout is captured
+    echo -n "$prompt" >&2
 
     while IFS= read -r -s -n1 char; do
         if [[ -z "$char" ]]; then
@@ -42,15 +43,17 @@ read_password() {
         if [[ "$char" == $'\x7f' || "$char" == $'\x08' ]]; then
             if [[ -n "$password" ]]; then
                 password="${password%?}"
-                echo -ne "\b \b"
+                echo -ne "\b \b" >&2
             fi
         else
             password+="$char"
-            echo -n "*"
+            echo -n "*" >&2
         fi
     done
 
-    echo ""
+    # Newline to stderr for display
+    echo "" >&2
+    # Password to stdout for capture
     echo "$password"
 }
 
