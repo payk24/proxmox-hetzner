@@ -116,13 +116,9 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    # Reset terminal state and clear input buffer before reading password
-    # read -e (readline) can leave terminal in a state that affects subsequent reads
-    stty sane 2>/dev/null || true
-    read -t 0.1 -n 10000 discard 2>/dev/null || true
-
-    # Read password with asterisks displayed
-    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+    # Read password (silent mode, no echo)
+    read -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
+    echo ""
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
@@ -136,10 +132,10 @@ get_system_inputs() {
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
         echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+        read -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
+        echo ""
     done
 
-    echo ""
     echo "Private subnet: $PRIVATE_SUBNET"
     echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
