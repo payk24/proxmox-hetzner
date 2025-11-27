@@ -154,6 +154,21 @@ log() {
 clear
 
 # =============================================================================
+# Install display utilities (boxes for tables, column for alignment)
+# =============================================================================
+install_display_utils() {
+    local need_install=false
+    command -v boxes &> /dev/null || need_install=true
+    command -v column &> /dev/null || need_install=true
+
+    if $need_install; then
+        apt-get update -qq > /dev/null 2>&1
+        apt-get install -qq -y boxes bsdmainutils > /dev/null 2>&1
+    fi
+}
+install_display_utils
+
+# =============================================================================
 # ASCII Banner
 # =============================================================================
 echo -e "${CLR_CYAN}"
