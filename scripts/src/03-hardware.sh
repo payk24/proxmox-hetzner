@@ -54,13 +54,13 @@ show_system_status() {
         sys_rows+="[ERROR]|Internet|No connection"$'\n'
     fi
 
-    # Disk space
+    # Temp space (rescue system free space for downloading ISO)
     if [[ "$PREFLIGHT_DISK" == *"✓"* ]]; then
         local disk_val="${PREFLIGHT_DISK#✓ }"
-        sys_rows+="[OK]|Disk Space|${disk_val}"$'\n'
+        sys_rows+="[OK]|Temp Space|${disk_val}"$'\n'
     else
         local disk_val="${PREFLIGHT_DISK#✗ }"
-        sys_rows+="[ERROR]|Disk Space|${disk_val}"$'\n'
+        sys_rows+="[ERROR]|Temp Space|${disk_val}"$'\n'
     fi
 
     # RAM
