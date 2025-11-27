@@ -2,6 +2,53 @@
 # Helper functions
 # =============================================================================
 
+# Table drawing constants
+TABLE_WIDTH=55
+TABLE_COL1=17
+TABLE_COL2=35
+
+# Draw table border
+table_top() {
+    echo -e "${CLR_BLUE}┌$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┐${CLR_RESET}"
+}
+
+table_bottom() {
+    echo -e "${CLR_BLUE}└$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┘${CLR_RESET}"
+}
+
+table_separator() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┤${CLR_RESET}"
+}
+
+table_separator_cols() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┬$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
+}
+
+table_separator_cols_end() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┴$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
+}
+
+# Table header (full width)
+table_header() {
+    local title="$1"
+    printf "${CLR_BLUE}│${CLR_RESET} ${CLR_CYAN}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$title"
+}
+
+# Table row with two columns
+table_row() {
+    local col1="$1"
+    local col2="$2"
+    local color="${3:-${CLR_RESET}}"
+    printf "${CLR_BLUE}│${CLR_RESET} %-$((TABLE_COL1-2))s ${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_COL2-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$col1" "$col2"
+}
+
+# Table row full width
+table_row_full() {
+    local text="$1"
+    local color="${2:-${CLR_RESET}}"
+    printf "${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$text"
+}
+
 # Download files with retry
 download_file() {
     local output_file="$1"

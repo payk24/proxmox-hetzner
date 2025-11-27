@@ -202,6 +202,53 @@ echo ""
 # Helper functions
 # =============================================================================
 
+# Table drawing constants
+TABLE_WIDTH=55
+TABLE_COL1=17
+TABLE_COL2=35
+
+# Draw table border
+table_top() {
+    echo -e "${CLR_BLUE}┌$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┐${CLR_RESET}"
+}
+
+table_bottom() {
+    echo -e "${CLR_BLUE}└$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┘${CLR_RESET}"
+}
+
+table_separator() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_WIDTH))┤${CLR_RESET}"
+}
+
+table_separator_cols() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┬$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
+}
+
+table_separator_cols_end() {
+    echo -e "${CLR_BLUE}├$(printf '─%.0s' $(seq 1 $TABLE_COL1))┴$(printf '─%.0s' $(seq 1 $TABLE_COL2))┤${CLR_RESET}"
+}
+
+# Table header (full width)
+table_header() {
+    local title="$1"
+    printf "${CLR_BLUE}│${CLR_RESET} ${CLR_CYAN}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$title"
+}
+
+# Table row with two columns
+table_row() {
+    local col1="$1"
+    local col2="$2"
+    local color="${3:-${CLR_RESET}}"
+    printf "${CLR_BLUE}│${CLR_RESET} %-$((TABLE_COL1-2))s ${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_COL2-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$col1" "$col2"
+}
+
+# Table row full width
+table_row_full() {
+    local text="$1"
+    local color="${2:-${CLR_RESET}}"
+    printf "${CLR_BLUE}│${CLR_RESET} ${color}%-$((TABLE_WIDTH-2))s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "$text"
+}
+
 # Download files with retry
 download_file() {
     local output_file="$1"
@@ -359,14 +406,31 @@ wait_with_progress() {
 
 # --- 02-validation.sh ---
 # =============================================================================
-# System info collection
+# System info collection with progress
 # =============================================================================
 
 collect_system_info() {
     local errors=0
+    local checks=6
+    local current=0
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
 
-    # Store results in global variables for combined table display
+    # Progress update helper
+    update_progress() {
+        current=$((current + 1))
+        local pct=$((current * 100 / checks))
+        local filled=$((pct / 5))
+        local empty=$((20 - filled))
+        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} Checking system... [${CLR_GREEN}"
+        printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
+        printf "${CLR_RESET}${CLR_BLUE}"
+        printf '░%.0s' $(seq 1 $empty 2>/dev/null) 2>/dev/null || true
+        printf "${CLR_RESET}${CLR_YELLOW}] %3d%%${CLR_RESET}" "$pct"
+    }
+
     # Check if running as root
+    update_progress
     if [[ $EUID -ne 0 ]]; then
         PREFLIGHT_ROOT="✗ Not root"
         PREFLIGHT_ROOT_CLR="${CLR_RED}"
@@ -375,8 +439,10 @@ collect_system_info() {
         PREFLIGHT_ROOT="✓ Running as root"
         PREFLIGHT_ROOT_CLR="${CLR_GREEN}"
     fi
+    sleep 0.1
 
     # Check internet connectivity
+    update_progress
     if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
         PREFLIGHT_NET="✓ Available"
         PREFLIGHT_NET_CLR="${CLR_GREEN}"
@@ -387,6 +453,7 @@ collect_system_info() {
     fi
 
     # Check available disk space (need at least 5GB in /root)
+    update_progress
     local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
     if [[ $free_space_mb -ge 5000 ]]; then
         PREFLIGHT_DISK="✓ ${free_space_mb} MB"
@@ -396,8 +463,10 @@ collect_system_info() {
         PREFLIGHT_DISK_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
+    sleep 0.1
 
     # Check RAM (need at least 4GB)
+    update_progress
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     if [[ $total_ram_mb -ge 4000 ]]; then
         PREFLIGHT_RAM="✓ ${total_ram_mb} MB"
@@ -407,8 +476,10 @@ collect_system_info() {
         PREFLIGHT_RAM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
+    sleep 0.1
 
     # Check CPU cores
+    update_progress
     local cpu_cores=$(nproc)
     if [[ $cpu_cores -ge 2 ]]; then
         PREFLIGHT_CPU="✓ ${cpu_cores} cores"
@@ -417,8 +488,10 @@ collect_system_info() {
         PREFLIGHT_CPU="⚠ ${cpu_cores} core(s)"
         PREFLIGHT_CPU_CLR="${CLR_YELLOW}"
     fi
+    sleep 0.1
 
     # Check if KVM is available
+    update_progress
     if [[ -e /dev/kvm ]]; then
         PREFLIGHT_KVM="✓ Available"
         PREFLIGHT_KVM_CLR="${CLR_GREEN}"
@@ -427,6 +500,10 @@ collect_system_info() {
         PREFLIGHT_KVM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
+    sleep 0.1
+
+    # Clear progress line
+    printf "\r\033[K"
 
     PREFLIGHT_ERRORS=$errors
 }
@@ -517,7 +594,6 @@ show_system_status() {
     local -a drive_names=()
     local -a drive_sizes=()
     local -a drive_models=()
-    local max_model_len=10
 
     for drive in "${NVME_DRIVES[@]}"; do
         local name=$(basename "$drive")
@@ -526,7 +602,6 @@ show_system_status() {
         drive_names+=("$name")
         drive_sizes+=("$size")
         drive_models+=("$model")
-        [[ ${#model} -gt $max_model_len ]] && max_model_len=${#model}
     done
 
     # Determine RAID mode
@@ -536,36 +611,36 @@ show_system_status() {
         RAID_MODE="raid1"
     fi
 
-    # Print combined system info table
-    echo -e "${CLR_BLUE}┌─────────────────────────────────────────────────────┐${CLR_RESET}"
-    echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}System Information${CLR_RESET}                                 ${CLR_BLUE}│${CLR_RESET}"
-    echo -e "${CLR_BLUE}├───────────────────┬─────────────────────────────────┤${CLR_RESET}"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
-    echo -e "${CLR_BLUE}├───────────────────┴─────────────────────────────────┤${CLR_RESET}"
-    echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}Storage${CLR_RESET}                                            ${CLR_BLUE}│${CLR_RESET}"
-    echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
+    # Print combined system info table using helper functions
+    table_top
+    table_header "System Information"
+    table_separator_cols
+    table_row "Root Access" "$PREFLIGHT_ROOT" "$PREFLIGHT_ROOT_CLR"
+    table_row "Internet" "$PREFLIGHT_NET" "$PREFLIGHT_NET_CLR"
+    table_row "Disk Space" "$PREFLIGHT_DISK" "$PREFLIGHT_DISK_CLR"
+    table_row "RAM" "$PREFLIGHT_RAM" "$PREFLIGHT_RAM_CLR"
+    table_row "CPU" "$PREFLIGHT_CPU" "$PREFLIGHT_CPU_CLR"
+    table_row "KVM" "$PREFLIGHT_KVM" "$PREFLIGHT_KVM_CLR"
+    table_separator_cols_end
+    table_header "Storage"
+    table_separator
 
     if [ $nvme_error -eq 1 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-53s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+        table_row_full "✗ No NVMe drives detected!" "$CLR_RED"
     else
         for i in "${!drive_names[@]}"; do
-            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-31s${CLR_BLUE}│${CLR_RESET}\n" \
-                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:31}"
+            local drive_info=$(printf "✓ %-10s %5s  %s" "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}")
+            table_row_full "$drive_info" "$CLR_GREEN"
         done
     fi
 
-    echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
+    table_separator
     if [ "$RAID_MODE" = "single" ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
+        table_row_full "Mode: Single Drive (no RAID)" "$CLR_YELLOW"
     else
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
+        table_row_full "Mode: ZFS RAID-1 (mirror)" "$CLR_GREEN"
     fi
-    echo -e "${CLR_BLUE}└─────────────────────────────────────────────────────┘${CLR_RESET}"
+    table_bottom
     echo ""
 
     # Check for errors
@@ -662,8 +737,8 @@ get_system_inputs() {
         echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
         local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
         read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
-        # Show checkmark on same line
-        printf "\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\n"
+        # Move cursor up one line and overwrite with checkmark
+        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\033[K\n"
     fi
 
     # Get network information from the CURRENT interface (the one active in Rescue)
@@ -682,17 +757,6 @@ get_system_inputs() {
         FIRST_IPV6_CIDR=""
     fi
 
-    # Display detected information
-    echo -e "${CLR_YELLOW}Detected Network Information:${CLR_RESET}"
-    echo "Current Interface (Rescue): $CURRENT_INTERFACE"
-    echo "Config Interface (Proxmox): $INTERFACE_NAME"
-    echo "Main IPv4 CIDR: $MAIN_IPV4_CIDR"
-    echo "Main IPv4: $MAIN_IPV4"
-    echo "Main IPv4 Gateway: $MAIN_IPV4_GW"
-    echo "MAC Address: $MAC_ADDRESS"
-    echo "IPv6 CIDR: $IPV6_CIDR"
-    echo "IPv6: $MAIN_IPV6"
-
     # Get user input for other configuration with validation
     # Note: PVE_HOSTNAME is used instead of HOSTNAME to avoid conflict with bash built-in
     if [[ "$NON_INTERACTIVE" == true ]]; then
@@ -707,7 +771,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$hostname_prompt" -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
             if validate_hostname "$PVE_HOSTNAME"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
@@ -715,13 +779,13 @@ get_system_inputs() {
 
         local domain_prompt="Enter domain suffix: "
         read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
-        printf "\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\n"
+        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
 
         local tz_prompt="Enter your timezone: "
         while true; do
             read -e -p "$tz_prompt" -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
             if validate_timezone "$TIMEZONE"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
@@ -731,7 +795,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
             if validate_email "$EMAIL"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
@@ -741,7 +805,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$subnet_prompt" -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
             if validate_subnet "$PRIVATE_SUBNET"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
@@ -771,9 +835,6 @@ get_system_inputs() {
             done
         fi
     fi
-
-    echo "Private subnet: $PRIVATE_SUBNET"
-    echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
     # SSH Public Key (required for hardened SSH config)
     if [[ "$NON_INTERACTIVE" == true ]]; then
