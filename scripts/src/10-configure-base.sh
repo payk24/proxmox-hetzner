@@ -16,6 +16,11 @@ make_template_files() {
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
 
+    # Shell and MOTD templates
+    download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+    download_file "./template_files/00-proxmox-motd" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/00-proxmox-motd"
+    download_file "./template_files/firewall-setup.sh" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/firewall-setup.sh"
+
     # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
@@ -125,87 +130,12 @@ configure_base_system() {
     '
 
     # Install and configure zsh as default shell
-    remote_exec_with_progress "Installing and configuring ZSH" '
+    remote_exec_with_progress "Installing ZSH" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting
-
-        # Create minimal .zshrc for root
-        cat > /root/.zshrc << '\''ZSHRC'\''
-# Proxmox ZSH Configuration
-
-# Locale
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
-
-# History settings
-HISTFILE=~/.zsh_history
-HISTSIZE=10000
-SAVEHIST=10000
-setopt HIST_IGNORE_DUPS
-setopt HIST_IGNORE_SPACE
-setopt SHARE_HISTORY
-setopt APPEND_HISTORY
-
-# Key bindings
-bindkey -e
-bindkey '\''^[[A'\'' history-search-backward
-bindkey '\''^[[B'\'' history-search-forward
-bindkey '\''^[[H'\'' beginning-of-line
-bindkey '\''^[[F'\'' end-of-line
-bindkey '\''^[[3~'\'' delete-char
-
-# Completion
-autoload -Uz compinit && compinit
-zstyle '\'':completion:*'\'' menu select
-zstyle '\'':completion:*'\'' matcher-list '\''m:{a-zA-Z}={A-Za-z}'\''
-
-# Colors
-autoload -Uz colors && colors
-
-# Prompt with git branch support
-autoload -Uz vcs_info
-precmd() { vcs_info }
-zstyle '\'':vcs_info:git:*'\'' formats '\'' (%b)'\''
-setopt PROMPT_SUBST
-PROMPT='\''%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '\''
-
-# Aliases
-alias ll='\''ls -lah --color=auto'\''
-alias la='\''ls -A --color=auto'\''
-alias l='\''ls -CF --color=auto'\''
-alias grep='\''grep --color=auto'\''
-alias df='\''df -h'\''
-alias du='\''du -h'\''
-alias free='\''free -h'\''
-alias ..='\''cd ..'\''
-alias ...='\''cd ../..'\''
-
-# Proxmox aliases
-alias qml='\''qm list'\''
-alias pctl='\''pct list'\''
-alias pvesh='\''pvesh'\''
-alias zpl='\''zpool list'\''
-alias zst='\''zpool status'\''
-
-# Use bat instead of cat if available
-command -v bat &>/dev/null && alias cat='\''bat --paging=never'\''
-
-# Use btop instead of top if available
-command -v btop &>/dev/null && alias top='\''btop'\''
-
-# Load plugins if available
-[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
-    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
-    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-
-# Auto-suggestions color (gray)
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='\''fg=8'\''
-ZSHRC
-
-        # Set zsh as default shell for root
         chsh -s /bin/zsh root
     '
+    remote_copy "template_files/zshrc" "/root/.zshrc"
 
     # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
