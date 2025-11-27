@@ -190,6 +190,42 @@ show_progress() {
     printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
 }
 
+# Parse SSH public key into components
+# Sets: SSH_KEY_TYPE, SSH_KEY_DATA, SSH_KEY_COMMENT, SSH_KEY_SHORT
+parse_ssh_key() {
+    local key="$1"
+
+    # Reset variables
+    SSH_KEY_TYPE=""
+    SSH_KEY_DATA=""
+    SSH_KEY_COMMENT=""
+    SSH_KEY_SHORT=""
+
+    if [[ -z "$key" ]]; then
+        return 1
+    fi
+
+    # Parse: type base64data [comment]
+    SSH_KEY_TYPE=$(echo "$key" | awk '{print $1}')
+    SSH_KEY_DATA=$(echo "$key" | awk '{print $2}')
+    SSH_KEY_COMMENT=$(echo "$key" | awk '{$1=""; $2=""; print}' | sed 's/^ *//')
+
+    # Create shortened version of key data (first 20 + last 10 chars)
+    if [[ ${#SSH_KEY_DATA} -gt 35 ]]; then
+        SSH_KEY_SHORT="${SSH_KEY_DATA:0:20}...${SSH_KEY_DATA: -10}"
+    else
+        SSH_KEY_SHORT="$SSH_KEY_DATA"
+    fi
+
+    return 0
+}
+
+# Validate SSH public key format
+validate_ssh_key() {
+    local key="$1"
+    [[ "$key" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]
+}
+
 # Wait for condition with progress
 wait_with_progress() {
     local message="$1"
