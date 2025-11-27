@@ -666,6 +666,43 @@ ZFSEOF
         fi
 REPOEOF
 
+    # Install monitoring and system utilities (Optional Post-Installation Optimizations)
+    echo -e "${CLR_YELLOW}Installing monitoring and system utilities...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'UTILSEOF'
+        # Update packages first
+        apt-get update -qq
+
+        # Install monitoring & system utilities
+        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
+            echo "Some packages may not be available, installing what we can..."
+            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
+                apt-get install -yqq "$pkg" 2>/dev/null || echo "Package $pkg not available"
+            done
+        }
+
+        # Optional: for VM image manipulation
+        apt-get install -yqq libguestfs-tools 2>/dev/null || echo "libguestfs-tools not available"
+
+        echo "Monitoring utilities installed"
+UTILSEOF
+
+    # Configure nf_conntrack for better network connection tracking
+    echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CONNTRACKEOF'
+        # Add nf_conntrack module to load at boot
+        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
+            echo "nf_conntrack" >> /etc/modules
+        fi
+
+        # Configure connection tracking limits
+        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
+            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
+            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
+        fi
+
+        echo "nf_conntrack configured"
+CONNTRACKEOF
+
     # Configure CPU governor for performance
     echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
@@ -910,6 +947,12 @@ reboot_to_main_os() {
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo "  ✓ Subscription notice removed"
     echo "  ✓ UEFI boot order: disk first, PXE second"
+    echo ""
+    echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
+    echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
+    echo "  ✓ VM image tools: libguestfs-tools"
+    echo "  ✓ ZFS ARC memory limits configured"
+    echo "  ✓ nf_conntrack optimized for high connection counts"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then

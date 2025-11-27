@@ -67,22 +67,11 @@ The script will:
 - Apply recommended system settings
 - **Optional:** Install Tailscale VPN with SSH and Web UI access
 
-### 3. Optional Post-Installation Optimizations
+### 3. Automatic Post-Installation Optimizations
 
-Run these commands in your Proxmox environment for additional optimizations:
+The installation script automatically applies the following optimizations:
 
-```bash
-# Update system packages
-apt update && apt -y upgrade && apt -y autoremove && pveupgrade && pveam update
-
-# Monitoring & system utilities
-apt install -y btop iotop ncdu tmux pigz smartmontools jq bat
-
-# Optional: for VM image manipulation
-apt install -y libguestfs-tools
-```
-
-**Utility descriptions:**
+**Installed Utilities:**
 | Package | Purpose |
 |---------|---------|
 | `btop` | Modern system monitor (CPU, RAM, disk, network) |
@@ -93,21 +82,16 @@ apt install -y libguestfs-tools
 | `smartmontools` | Disk health monitoring (SMART) |
 | `jq` | JSON parser (useful for API/scripts) |
 | `bat` | Modern `cat` with syntax highlighting |
+| `libguestfs-tools` | VM image manipulation tools |
 
-> **Note:** Subscription notice is removed automatically during installation.
+**System Optimizations (applied automatically):**
+- ZFS ARC memory limits (dynamically calculated based on system RAM)
+- nf_conntrack optimized for high connection counts (max 1M connections)
+- CPU governor set to performance mode
+- Subscription notice removed
+- Enterprise repositories disabled (no subscription required)
 
-#### Optimize ZFS Memory Usage
-
-```bash
-# Configure ZFS memory limits
-echo "nf_conntrack" >> /etc/modules
-echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
-echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
-rm -f /etc/modprobe.d/zfs.conf
-echo "options zfs zfs_arc_min=$[6 * 1024*1024*1024]" >> /etc/modprobe.d/99-zfs.conf
-echo "options zfs zfs_arc_max=$[12 * 1024*1024*1024]" >> /etc/modprobe.d/99-zfs.conf
-update-initramfs -u
-```
+> **Note:** After installation, you may want to run `apt update && apt upgrade` to get the latest package updates.
 
 ## ✅ Accessing Your Proxmox Server
 
