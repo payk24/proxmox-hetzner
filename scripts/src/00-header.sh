@@ -133,6 +133,9 @@ TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
 
 # ZFS RAID mode (single, raid0, raid1)
 ZFS_RAID="${ZFS_RAID}"
+
+# Cluster mode (single, cluster)
+CLUSTER_MODE="${CLUSTER_MODE}"
 EOF
     chmod 600 "$file"
     echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"

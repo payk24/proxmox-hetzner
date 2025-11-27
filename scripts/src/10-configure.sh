@@ -206,13 +206,76 @@ ENVEOF
         fi
     ' "CPU governor configured"
 
-    # Remove Proxmox subscription notice
+    # Remove Proxmox subscription notice (Web + Mobile UI) with persistent DPkg hook
     remote_exec_with_progress "Removing Proxmox subscription notice" '
-        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-            systemctl restart pveproxy.service
-        fi
-    ' "Subscription notice removed"
+        # Create persistent nag removal script
+        mkdir -p /usr/local/bin
+        cat > /usr/local/bin/pve-remove-nag.sh << '\''NAGSCRIPT'\''
+#!/bin/sh
+# Proxmox subscription nag removal script
+# This script is called after apt upgrades to re-apply patches
+
+# Patch Web UI
+WEB_JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+if [ -s "$WEB_JS" ] && ! grep -q "NoMoreNagging" "$WEB_JS"; then
+    sed -i.bak -e "/data\.status/ s/!//" -e "/data\.status/ s/active/NoMoreNagging/" "$WEB_JS"
+fi
+
+# Patch Mobile UI
+MOBILE_TPL=/usr/share/pve-yew-mobile-gui/index.html.tpl
+MARKER="<!-- MANAGED BLOCK FOR MOBILE NAG -->"
+if [ -f "$MOBILE_TPL" ] && ! grep -q "$MARKER" "$MOBILE_TPL"; then
+    printf "%s\n" \
+      "$MARKER" \
+      "<script>" \
+      "  function removeSubscriptionElements() {" \
+      "    const dialogs = document.querySelectorAll('\''dialog.pwt-outer-dialog'\'');" \
+      "    dialogs.forEach(dialog => {" \
+      "      const text = (dialog.textContent || '\'\'').toLowerCase();" \
+      "      if (text.includes('\''subscription'\'')) { dialog.remove(); }" \
+      "    });" \
+      "    const cards = document.querySelectorAll('\''.pwt-card.pwt-p-2.pwt-d-flex.pwt-interactive.pwt-justify-content-center'\'');" \
+      "    cards.forEach(card => {" \
+      "      const text = (card.textContent || '\'\'').toLowerCase();" \
+      "      const hasButton = card.querySelector('\''button'\'');" \
+      "      if (!hasButton && text.includes('\''subscription'\'')) { card.remove(); }" \
+      "    });" \
+      "  }" \
+      "  const observer = new MutationObserver(removeSubscriptionElements);" \
+      "  observer.observe(document.body, { childList: true, subtree: true });" \
+      "  removeSubscriptionElements();" \
+      "  setInterval(removeSubscriptionElements, 300);" \
+      "  setTimeout(() => { observer.disconnect(); }, 10000);" \
+      "</script>" >> "$MOBILE_TPL"
+fi
+NAGSCRIPT
+        chmod 755 /usr/local/bin/pve-remove-nag.sh
+
+        # Create DPkg hook to run after package upgrades
+        cat > /etc/apt/apt.conf.d/99-pve-nag-removal << '\''DPKGHOOK'\''
+DPkg::Post-Invoke { "/usr/local/bin/pve-remove-nag.sh"; };
+DPKGHOOK
+        chmod 644 /etc/apt/apt.conf.d/99-pve-nag-removal
+
+        # Run the script now to apply patches
+        /usr/local/bin/pve-remove-nag.sh
+
+        # Restart pveproxy to apply changes
+        systemctl restart pveproxy.service 2>/dev/null || true
+    ' "Subscription notice removed (persistent)"
+
+    # Disable HA services for single-node mode (saves ~100-200MB RAM)
+    if [[ "$CLUSTER_MODE" == "single" ]]; then
+        remote_exec_with_progress "Disabling HA services (single-node mode)" '
+            # Disable High Availability services
+            systemctl disable --now pve-ha-lrm 2>/dev/null || true
+            systemctl disable --now pve-ha-crm 2>/dev/null || true
+            systemctl disable --now corosync 2>/dev/null || true
+
+            # Mask services to prevent accidental starts
+            systemctl mask pve-ha-lrm pve-ha-crm corosync 2>/dev/null || true
+        ' "HA services disabled (single-node)"
+    fi
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
