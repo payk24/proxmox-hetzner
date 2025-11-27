@@ -379,25 +379,18 @@ prompt_validated() {
 # Spinner characters for progress display
 SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
-# Progress indicator with spinner and elapsed time
+# Progress indicator with spinner
 show_progress() {
     local pid=$1
     local message="${2:-Processing}"
-    local start_time=$(date +%s)
     local i=0
 
     while kill -0 "$pid" 2>/dev/null; do
-        local elapsed=$(($(date +%s) - start_time))
-        local mins=$((elapsed / 60))
-        local secs=$((elapsed % 60))
-        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
         sleep 0.2
     done
 
-    local total=$(($(date +%s) - start_time))
-    local mins=$((total / 60))
-    local secs=$((total % 60))
-    printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
 }
 
 # Wait for condition with progress
@@ -411,20 +404,18 @@ wait_with_progress() {
 
     while true; do
         local elapsed=$(($(date +%s) - start_time))
-        local mins=$((elapsed / 60))
-        local secs=$((elapsed % 60))
 
         if eval "$check_cmd" 2>/dev/null; then
-            printf "\r${CLR_GREEN}✓ %s [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
             return 0
         fi
 
         if [ $elapsed -ge $timeout ]; then
-            printf "\r${CLR_RED}✗ %s timed out [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            printf "\r${CLR_RED}✗ %s timed out${CLR_RESET}                    \n" "$message"
             return 1
         fi
 
-        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
         sleep "$interval"
     done
 }
@@ -1592,9 +1583,7 @@ download_proxmox_iso() {
             ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
             rm -f /tmp/iso_checksum.txt
 
-            if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                print_success "ISO checksum verified"
-            else
+            if [[ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]]; then
                 print_error "ISO checksum verification FAILED!"
                 print_error "Expected: $EXPECTED_CHECKSUM"
                 print_error "Actual:   $ACTUAL_CHECKSUM"
@@ -1611,8 +1600,6 @@ download_proxmox_iso() {
 }
 
 make_answer_toml() {
-    print_info "Making answer.toml..."
-
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
         single)
@@ -1646,7 +1633,6 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    print_success "answer.toml created (ZFS $ZFS_RAID mode)"
 }
 
 make_autoinstall_iso() {
