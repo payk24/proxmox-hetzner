@@ -220,7 +220,6 @@ get_system_inputs() {
         # =====================================================================
         # SECTION 2: Interactive menus (all selection menus grouped together)
         # =====================================================================
-        echo ""  # Visual separator before menus
 
         # --- Timezone selection menu ---
         if [[ -n "$TIMEZONE" ]]; then
