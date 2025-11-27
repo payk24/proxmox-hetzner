@@ -79,7 +79,7 @@ configure_proxmox_via_ssh() {
         mkdir -p /etc/modprobe.d
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
-    '
+    ' "ZFS ARC memory limits configured"
 
     # Disable enterprise repositories
     remote_exec_with_progress "Disabling enterprise repositories" '
@@ -93,7 +93,7 @@ configure_proxmox_via_ssh() {
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
             sed -i "s|^deb.*enterprise.proxmox.com|# &|g" /etc/apt/sources.list
         fi
-    '
+    ' "Enterprise repositories disabled"
 
     # Update all system packages
     remote_exec_with_progress "Updating system packages" '
@@ -104,7 +104,7 @@ configure_proxmox_via_ssh() {
         apt-get clean
         pveupgrade 2>/dev/null || true
         pveam update 2>/dev/null || true
-    '
+    ' "System packages updated"
 
     # Install monitoring and system utilities
     remote_exec_with_progress "Installing system utilities" '
@@ -115,7 +115,7 @@ configure_proxmox_via_ssh() {
             done
         }
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
-    '
+    ' "System utilities installed"
 
     # Configure UTF-8 locales (fix for btop and other apps)
     remote_exec_with_progress "Configuring UTF-8 locales" '
@@ -140,21 +140,21 @@ LANG=en_US.UTF-8
 LC_ALL=en_US.UTF-8
 LANGUAGE=en_US.UTF-8
 DEFLOCEOF
-    '
+    ' "UTF-8 locales configured"
 
     # Configure ZSH as default shell for root
     (
         remote_copy "template_files/zshrc" "/root/.zshrc"
         remote_exec "chsh -s /bin/zsh root"
     ) > /dev/null 2>&1 &
-    show_progress $! "Configuring ZSH"
+    show_progress $! "Configuring ZSH" "ZSH configured"
 
     # Configure NTP time synchronization with chrony
-    remote_exec_with_progress "Installing and configuring NTP (chrony)" '
+    remote_exec_with_progress "Installing NTP (chrony)" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq chrony
         systemctl stop chrony
-    '
+    ' "NTP (chrony) installed"
     remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
     remote_exec "systemctl enable chrony && systemctl start chrony"
 
@@ -165,13 +165,13 @@ DEFLOCEOF
         remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
         remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
     ) > /dev/null 2>&1 &
-    show_progress $! "Configuring dynamic MOTD"
+    show_progress $! "Configuring dynamic MOTD" "Dynamic MOTD configured"
 
     # Configure Unattended Upgrades (security updates, kernel excluded)
-    remote_exec_with_progress "Installing and configuring Unattended Upgrades" '
+    remote_exec_with_progress "Installing Unattended Upgrades" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq unattended-upgrades apt-listchanges
-    '
+    ' "Unattended Upgrades installed"
     remote_copy "template_files/50unattended-upgrades" "/etc/apt/apt.conf.d/50unattended-upgrades"
     remote_copy "template_files/20auto-upgrades" "/etc/apt/apt.conf.d/20auto-upgrades"
     remote_exec "systemctl enable unattended-upgrades"
@@ -186,7 +186,7 @@ DEFLOCEOF
             echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
             echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
-    '
+    ' "nf_conntrack configured"
 
     # Configure CPU governor
     remote_exec_with_progress "Configuring CPU governor" '
@@ -197,7 +197,7 @@ DEFLOCEOF
                 [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true
             done
         fi
-    '
+    ' "CPU governor configured"
 
     # Remove Proxmox subscription notice
     remote_exec_with_progress "Removing Proxmox subscription notice" '
@@ -205,7 +205,7 @@ DEFLOCEOF
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
         fi
-    '
+    ' "Subscription notice removed"
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -216,7 +216,7 @@ DEFLOCEOF
             apt-get install -yqq tailscale
             systemctl enable tailscaled
             systemctl start tailscaled
-        '
+        ' "Tailscale VPN installed"
 
         # Build tailscale up command with selected options
         TAILSCALE_UP_CMD="tailscale up"

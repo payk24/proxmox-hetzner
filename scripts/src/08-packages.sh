@@ -7,7 +7,7 @@ prepare_packages() {
 
     # Download Proxmox GPG key
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
-    show_progress $! "Downloading Proxmox GPG key"
+    show_progress $! "Downloading Proxmox GPG key" "Proxmox GPG key downloaded"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to download Proxmox GPG key! Exiting."
@@ -17,7 +17,7 @@ prepare_packages() {
     # Update package lists
     apt clean > /dev/null 2>&1
     apt update > /dev/null 2>&1 &
-    show_progress $! "Updating package lists"
+    show_progress $! "Updating package lists" "Package lists updated"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to update package lists! Exiting."
@@ -26,7 +26,7 @@ prepare_packages() {
 
     # Install packages
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
-    show_progress $! "Installing packages"
+    show_progress $! "Installing required packages" "Required packages installed"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to install required packages! Exiting."
@@ -64,7 +64,7 @@ download_proxmox_iso() {
 
     # Download ISO with progress spinner (silent wget)
     wget -q -O pve.iso "$PROXMOX_ISO_URL" 2>/dev/null &
-    show_progress $! "Downloading $ISO_FILENAME"
+    show_progress $! "Downloading $ISO_FILENAME" "$ISO_FILENAME downloaded"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to download Proxmox ISO! Exiting."
@@ -84,7 +84,7 @@ download_proxmox_iso() {
         EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
         if [[ -n "$EXPECTED_CHECKSUM" ]]; then
             sha256sum pve.iso > /tmp/iso_checksum.txt 2>/dev/null &
-            show_progress $! "Verifying ISO checksum"
+            show_progress $! "Verifying ISO checksum" "ISO checksum verified"
             wait $!
             ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
             rm -f /tmp/iso_checksum.txt
@@ -143,7 +143,7 @@ EOF
 
 make_autoinstall_iso() {
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso > /dev/null 2>&1 &
-    show_progress $! "Creating autoinstall ISO"
+    show_progress $! "Creating autoinstall ISO" "Autoinstall ISO created"
 
     # Remove original ISO to save disk space (only autoinstall ISO is needed)
     rm -f pve.iso

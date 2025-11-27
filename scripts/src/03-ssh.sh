@@ -17,10 +17,11 @@ remote_exec_script() {
 remote_exec_with_progress() {
     local message="$1"
     local script="$2"
+    local done_message="${3:-$message}"
 
     echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
     local pid=$!
-    show_progress $pid "$message"
+    show_progress $pid "$message" "$done_message"
     wait $pid
     return $?
 }
