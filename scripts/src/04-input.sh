@@ -72,8 +72,8 @@ get_system_inputs() {
         echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
         local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
         read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
-        # Show checkmark on same line
-        printf "\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\n"
+        # Move cursor up one line and overwrite with checkmark
+        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\033[K\n"
     fi
 
     # Get network information from the CURRENT interface (the one active in Rescue)
@@ -92,17 +92,6 @@ get_system_inputs() {
         FIRST_IPV6_CIDR=""
     fi
 
-    # Display detected information
-    echo -e "${CLR_YELLOW}Detected Network Information:${CLR_RESET}"
-    echo "Current Interface (Rescue): $CURRENT_INTERFACE"
-    echo "Config Interface (Proxmox): $INTERFACE_NAME"
-    echo "Main IPv4 CIDR: $MAIN_IPV4_CIDR"
-    echo "Main IPv4: $MAIN_IPV4"
-    echo "Main IPv4 Gateway: $MAIN_IPV4_GW"
-    echo "MAC Address: $MAC_ADDRESS"
-    echo "IPv6 CIDR: $IPV6_CIDR"
-    echo "IPv6: $MAIN_IPV6"
-
     # Get user input for other configuration with validation
     # Note: PVE_HOSTNAME is used instead of HOSTNAME to avoid conflict with bash built-in
     if [[ "$NON_INTERACTIVE" == true ]]; then
@@ -117,7 +106,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$hostname_prompt" -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
             if validate_hostname "$PVE_HOSTNAME"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
@@ -125,13 +114,13 @@ get_system_inputs() {
 
         local domain_prompt="Enter domain suffix: "
         read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
-        printf "\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\n"
+        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
 
         local tz_prompt="Enter your timezone: "
         while true; do
             read -e -p "$tz_prompt" -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
             if validate_timezone "$TIMEZONE"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
@@ -141,7 +130,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
             if validate_email "$EMAIL"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
@@ -151,7 +140,7 @@ get_system_inputs() {
         while true; do
             read -e -p "$subnet_prompt" -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
             if validate_subnet "$PRIVATE_SUBNET"; then
-                printf "\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\n"
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\033[K\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
@@ -181,9 +170,6 @@ get_system_inputs() {
             done
         fi
     fi
-
-    echo "Private subnet: $PRIVATE_SUBNET"
-    echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
     # SSH Public Key (required for hardened SSH config)
     if [[ "$NON_INTERACTIVE" == true ]]; then
