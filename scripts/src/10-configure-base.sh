@@ -1,5 +1,5 @@
 # =============================================================================
-# Post-installation configuration
+# Base system configuration
 # =============================================================================
 
 make_template_files() {
@@ -40,9 +40,9 @@ make_template_files() {
     print_success "Template files modified"
 }
 
-# Configure the installed Proxmox via SSH
-configure_proxmox_via_ssh() {
-    print_info "Starting post-installation configuration via SSH..."
+# Configure base system via SSH
+configure_base_system() {
+    print_info "Starting base system configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
@@ -130,6 +130,89 @@ REPOEOF
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
+    # Install and configure zsh as default shell
+    print_info "Installing and configuring zsh..."
+    remote_exec_script << 'ZSHEOF'
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting
+
+        # Create minimal .zshrc for root
+        cat > /root/.zshrc << 'ZSHRC'
+# Proxmox ZSH Configuration
+
+# History settings
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt SHARE_HISTORY
+setopt APPEND_HISTORY
+
+# Key bindings
+bindkey -e
+bindkey '^[[A' history-search-backward
+bindkey '^[[B' history-search-forward
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+bindkey '^[[3~' delete-char
+
+# Completion
+autoload -Uz compinit && compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+
+# Colors
+autoload -Uz colors && colors
+
+# Prompt with git branch support
+autoload -Uz vcs_info
+precmd() { vcs_info }
+zstyle ':vcs_info:git:*' formats ' (%b)'
+setopt PROMPT_SUBST
+PROMPT='%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '
+
+# Aliases
+alias ll='ls -lah --color=auto'
+alias la='ls -A --color=auto'
+alias l='ls -CF --color=auto'
+alias grep='grep --color=auto'
+alias df='df -h'
+alias du='du -h'
+alias free='free -h'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Proxmox aliases
+alias qml='qm list'
+alias pctl='pct list'
+alias pvesh='pvesh'
+alias zpl='zpool list'
+alias zst='zpool status'
+
+# Use bat instead of cat if available
+command -v bat &>/dev/null && alias cat='bat --paging=never'
+
+# Use btop instead of top if available
+command -v btop &>/dev/null && alias top='btop'
+
+# Load plugins if available
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
+    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Auto-suggestions color (gray)
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+ZSHRC
+
+        # Set zsh as default shell for root
+        chsh -s /bin/zsh root
+
+        echo "ZSH installed and configured as default shell"
+ZSHEOF
+    print_success "ZSH configured as default shell"
+
     # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
         export DEBIAN_FRONTEND=noninteractive
@@ -139,23 +222,6 @@ REPOEOF
         locale-gen
         update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
     '
-
-    # Configure nf_conntrack
-    print_info "Configuring nf_conntrack..."
-    remote_exec_script << 'CONNTRACKEOF'
-        # Add nf_conntrack module to load at boot
-        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
-            echo "nf_conntrack" >> /etc/modules
-        fi
-
-        # Configure connection tracking limits
-        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
-            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
-            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
-        fi
-
-        echo "nf_conntrack configured"
-CONNTRACKEOF
 
     # Configure CPU governor
     remote_exec_with_progress "Configuring CPU governor" '
@@ -180,99 +246,5 @@ CONNTRACKEOF
         fi
 SUBEOF
 
-    # Hide Ceph from UI (not needed for single-server setup)
-    print_info "Hiding Ceph from UI..."
-    remote_exec_script << 'CEPHEOF'
-        # Create custom CSS to hide Ceph-related UI elements
-        CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-        cat > "$CUSTOM_CSS" << 'CSS'
-/* Hide Ceph menu items - not needed for single server */
-#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
-.x-treelist-item-text:has-text("Ceph") { display: none !important; }
-tr[data-qtip*="Ceph"] { display: none !important; }
-CSS
-
-        # Add custom CSS to index template if not already added
-        INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-        if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-            sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-            echo "Custom CSS added to hide Ceph"
-        fi
-
-        # Alternative: patch JavaScript to hide Ceph panel completely
-        PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-        if [ -f "$PVE_MANAGER_JS" ]; then
-            if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
-            fi
-        fi
-
-        systemctl restart pveproxy.service
-        echo "Ceph UI elements hidden"
-CEPHEOF
-
-    # Install Tailscale if requested
-    if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        remote_exec_with_progress "Installing Tailscale VPN" '
-            curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
-            curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
-            apt-get update -qq
-            apt-get install -yqq tailscale
-            systemctl enable tailscaled
-            systemctl start tailscaled
-        '
-
-        # Build tailscale up command with selected options
-        TAILSCALE_UP_CMD="tailscale up"
-        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            TAILSCALE_UP_CMD="$TAILSCALE_UP_CMD --authkey='$TAILSCALE_AUTH_KEY'"
-        fi
-        if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-            TAILSCALE_UP_CMD="$TAILSCALE_UP_CMD --ssh"
-        fi
-
-        # If auth key is provided, authenticate Tailscale
-        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            print_info "Authenticating Tailscale with provided auth key..."
-            remote_exec "$TAILSCALE_UP_CMD"
-
-            # Get Tailscale IP and hostname for display
-            TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
-            TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            print_success "Tailscale authenticated. IP: ${TAILSCALE_IP}"
-
-            # Configure Tailscale Serve for Proxmox Web UI
-            if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                print_info "Configuring Tailscale Serve for Proxmox Web UI..."
-                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                print_success "Proxmox Web UI available via Tailscale Serve"
-            fi
-        else
-            TAILSCALE_IP="not authenticated"
-            TAILSCALE_HOSTNAME=""
-            print_warning "Tailscale installed but not authenticated."
-            print_info "After reboot, run these commands to enable SSH and Web UI:"
-            print_info "  tailscale up --ssh"
-            print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
-        fi
-    fi
-
-    # Deploy SSH hardening LAST (after all other operations)
-    print_info "Deploying SSH hardening..."
-
-    # Deploy SSH public key FIRST (before disabling password auth!)
-    remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-    remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-    remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-
-    print_success "Security hardening configured"
-
-    # Power off the VM
-    print_info "Powering off the VM..."
-    remote_exec "poweroff" || true
-
-    # Wait for QEMU to exit
-    print_info "Waiting for QEMU process to exit..."
-    wait $QEMU_PID || true
-    print_success "QEMU process exited"
+    print_success "Base system configuration complete"
 }

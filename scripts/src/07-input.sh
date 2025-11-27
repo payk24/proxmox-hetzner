@@ -159,6 +159,25 @@ get_inputs_non_interactive() {
     else
         print_success "Tailscale: skipped"
     fi
+
+    # Optional features (use defaults if not set)
+    HIDE_CEPH="${HIDE_CEPH:-yes}"
+    INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN:-no}"
+    INSTALL_FIREWALL="${INSTALL_FIREWALL:-no}"
+    INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT:-no}"
+    INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES:-yes}"
+    INSTALL_MOTD="${INSTALL_MOTD:-yes}"
+    ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH:-no}"
+    OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD:-yes}"
+
+    print_success "Hide Ceph UI: ${HIDE_CEPH}"
+    print_success "Fail2ban: ${INSTALL_FAIL2BAN}"
+    print_success "Firewall: ${INSTALL_FIREWALL}"
+    print_success "Let's Encrypt: ${INSTALL_LETSENCRYPT}"
+    print_success "Unattended upgrades: ${INSTALL_UNATTENDED_UPGRADES}"
+    print_success "Custom MOTD: ${INSTALL_MOTD}"
+    print_success "PCI Passthrough: ${ENABLE_PCI_PASSTHROUGH}"
+    print_success "Journald optimization: ${OPTIMIZE_JOURNALD}"
 }
 
 # =============================================================================
@@ -445,6 +464,139 @@ get_inputs_interactive() {
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
             print_success "Tailscale installation skipped"
+        fi
+    fi
+
+    # --- Advanced Options ---
+    # Check if any advanced option is already set from env
+    local advanced_from_env=false
+    if [[ -n "$HIDE_CEPH" || -n "$INSTALL_FAIL2BAN" || -n "$INSTALL_FIREWALL" || \
+          -n "$INSTALL_LETSENCRYPT" || -n "$INSTALL_UNATTENDED_UPGRADES" || \
+          -n "$INSTALL_MOTD" || -n "$ENABLE_PCI_PASSTHROUGH" || -n "$OPTIMIZE_JOURNALD" ]]; then
+        advanced_from_env=true
+    fi
+
+    if [[ "$advanced_from_env" == true ]]; then
+        # Use values from environment/config, apply defaults
+        HIDE_CEPH="${HIDE_CEPH:-yes}"
+        INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN:-no}"
+        INSTALL_FIREWALL="${INSTALL_FIREWALL:-no}"
+        INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT:-no}"
+        INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES:-yes}"
+        INSTALL_MOTD="${INSTALL_MOTD:-yes}"
+        ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH:-no}"
+        OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD:-yes}"
+
+        print_success "Advanced options loaded from config/env"
+        [[ "$HIDE_CEPH" == "yes" ]] && print_success "  Hide Ceph UI: yes"
+        [[ "$INSTALL_FAIL2BAN" == "yes" ]] && print_success "  Fail2ban: yes"
+        [[ "$INSTALL_FIREWALL" == "yes" ]] && print_success "  Firewall: yes"
+        [[ "$INSTALL_LETSENCRYPT" == "yes" ]] && print_success "  Let's Encrypt: yes"
+        [[ "$INSTALL_UNATTENDED_UPGRADES" == "yes" ]] && print_success "  Unattended upgrades: yes"
+        [[ "$INSTALL_MOTD" == "yes" ]] && print_success "  Custom MOTD: yes"
+        [[ "$ENABLE_PCI_PASSTHROUGH" == "yes" ]] && print_success "  PCI Passthrough: yes"
+        [[ "$OPTIMIZE_JOURNALD" == "yes" ]] && print_success "  Journald optimization: yes"
+    else
+        # Set defaults first
+        HIDE_CEPH="yes"
+        INSTALL_FAIL2BAN="no"
+        INSTALL_FIREWALL="no"
+        INSTALL_LETSENCRYPT="no"
+        INSTALL_UNATTENDED_UPGRADES="yes"
+        INSTALL_MOTD="yes"
+        ENABLE_PCI_PASSTHROUGH="no"
+        OPTIMIZE_JOURNALD="yes"
+
+        local adv_header="Configure additional features for your Proxmox installation."$'\n'
+        adv_header+="Defaults are optimized for most use cases."
+
+        interactive_menu \
+            "Advanced Options (↑/↓ select, Enter confirm)" \
+            "$adv_header" \
+            "Use defaults|Recommended settings for most users" \
+            "Customize|Configure each option individually"
+
+        if [[ $MENU_SELECTED -eq 1 ]]; then
+            # --- Hide Ceph UI ---
+            interactive_menu \
+                "Hide Ceph UI (↑/↓ select, Enter confirm)" \
+                "Ceph is distributed storage, not needed for single-server" \
+                "Yes - Hide Ceph|Clean UI without Ceph menu items" \
+                "No - Show Ceph|Keep Ceph menu visible"
+            [[ $MENU_SELECTED -eq 0 ]] && HIDE_CEPH="yes" || HIDE_CEPH="no"
+            print_success "Hide Ceph UI: ${HIDE_CEPH}"
+
+            # --- Fail2ban ---
+            interactive_menu \
+                "Fail2ban - Brute-force Protection (↑/↓ select, Enter confirm)" \
+                "Blocks IPs after failed login attempts" \
+                "No - Skip|Install manually later if needed" \
+                "Yes - Install|Protect SSH and PVE Web from attacks"
+            [[ $MENU_SELECTED -eq 1 ]] && INSTALL_FAIL2BAN="yes" || INSTALL_FAIL2BAN="no"
+            print_success "Fail2ban: ${INSTALL_FAIL2BAN}"
+
+            # --- Firewall ---
+            interactive_menu \
+                "Basic Firewall (↑/↓ select, Enter confirm)" \
+                "iptables rules: allow SSH(22), PVE Web(8006), block rest" \
+                "No - Skip|No firewall rules (use PVE firewall instead)" \
+                "Yes - Enable|Basic host-level firewall protection"
+            [[ $MENU_SELECTED -eq 1 ]] && INSTALL_FIREWALL="yes" || INSTALL_FIREWALL="no"
+            print_success "Firewall: ${INSTALL_FIREWALL}"
+
+            # --- Let's Encrypt ---
+            interactive_menu \
+                "Let's Encrypt SSL Certificate (↑/↓ select, Enter confirm)" \
+                "Free HTTPS certificate for Proxmox Web UI" \
+                "No - Skip|Use self-signed certificate" \
+                "Yes - Install|Requires valid domain pointing to this server"
+            if [[ $MENU_SELECTED -eq 1 ]]; then
+                INSTALL_LETSENCRYPT="yes"
+                input_box "Let's Encrypt Domain" "Enter the domain for SSL certificate:" "Domain: " "${FQDN:-}"
+                LETSENCRYPT_DOMAIN="$INPUT_VALUE"
+                print_success "Let's Encrypt: yes (${LETSENCRYPT_DOMAIN})"
+            else
+                INSTALL_LETSENCRYPT="no"
+                print_success "Let's Encrypt: no"
+            fi
+
+            # --- Unattended Upgrades ---
+            interactive_menu \
+                "Unattended Security Upgrades (↑/↓ select, Enter confirm)" \
+                "Automatically install security updates" \
+                "Yes - Enable|Recommended for security" \
+                "No - Disable|Manual updates only"
+            [[ $MENU_SELECTED -eq 0 ]] && INSTALL_UNATTENDED_UPGRADES="yes" || INSTALL_UNATTENDED_UPGRADES="no"
+            print_success "Unattended upgrades: ${INSTALL_UNATTENDED_UPGRADES}"
+
+            # --- MOTD ---
+            interactive_menu \
+                "Custom MOTD (Message of the Day) (↑/↓ select, Enter confirm)" \
+                "Shows system info on SSH login" \
+                "Yes - Enable|Show CPU, RAM, disk usage on login" \
+                "No - Disable|Keep default MOTD"
+            [[ $MENU_SELECTED -eq 0 ]] && INSTALL_MOTD="yes" || INSTALL_MOTD="no"
+            print_success "Custom MOTD: ${INSTALL_MOTD}"
+
+            # --- PCI Passthrough ---
+            interactive_menu \
+                "PCI Passthrough Preparation (↑/↓ select, Enter confirm)" \
+                "Enable IOMMU for GPU/NIC passthrough to VMs" \
+                "No - Skip|Enable manually if needed later" \
+                "Yes - Enable|Configure GRUB for IOMMU support"
+            [[ $MENU_SELECTED -eq 1 ]] && ENABLE_PCI_PASSTHROUGH="yes" || ENABLE_PCI_PASSTHROUGH="no"
+            print_success "PCI Passthrough: ${ENABLE_PCI_PASSTHROUGH}"
+
+            # --- Journald Optimization ---
+            interactive_menu \
+                "Journald Log Optimization (↑/↓ select, Enter confirm)" \
+                "Limit system logs to prevent disk fill" \
+                "Yes - Enable|Limit logs to 1GB max" \
+                "No - Disable|Keep default journald settings"
+            [[ $MENU_SELECTED -eq 0 ]] && OPTIMIZE_JOURNALD="yes" || OPTIMIZE_JOURNALD="no"
+            print_success "Journald optimization: ${OPTIMIZE_JOURNALD}"
+        else
+            print_success "Using default advanced options"
         fi
     fi
 }
