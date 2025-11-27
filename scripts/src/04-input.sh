@@ -279,47 +279,176 @@ get_system_inputs() {
             echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
             exit 1
         fi
-        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+        parse_ssh_key "$SSH_PUBLIC_KEY"
+        echo -e "${CLR_GREEN}✓ SSH key configured (${SSH_KEY_TYPE})${CLR_RESET}"
     else
-        echo ""
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
-        echo ""
-
         # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
-        if [[ -z "$SSH_PUBLIC_KEY" && -f /root/.ssh/authorized_keys ]]; then
-            SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+        local DETECTED_SSH_KEY=""
+        if [[ -f /root/.ssh/authorized_keys ]]; then
+            DETECTED_SSH_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
         fi
 
-        if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-            echo -e "${CLR_GREEN}Found SSH public key:${CLR_RESET}"
-            echo "${SSH_PUBLIC_KEY:0:50}..."
-            echo ""
-            read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
-            if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
+        if [[ -n "$DETECTED_SSH_KEY" ]]; then
+            # Key detected - show interactive selector
+            parse_ssh_key "$DETECTED_SSH_KEY"
+
+            local options=("detected" "manual")
+            local labels=("Use detected key" "Enter different key")
+            local descriptions=("Recommended - already configured in Hetzner" "Paste your own SSH public key")
+            local selected=0
+            local key=""
+            local box_lines=0
+
+            # Hide cursor
+            tput civis
+
+            # Function to draw the SSH selection box
+            draw_ssh_menu() {
+                local content=""
+                content+="! Password authentication will be DISABLED"$'\n'
+                content+=""$'\n'
+                content+="Detected key from Rescue System:"$'\n'
+                content+="  Type:    ${SSH_KEY_TYPE}"$'\n'
+                content+="  Key:     ${SSH_KEY_SHORT}"$'\n'
+                if [[ -n "$SSH_KEY_COMMENT" ]]; then
+                    content+="  Comment: ${SSH_KEY_COMMENT}"$'\n'
+                fi
+                content+=""$'\n'
+                for i in "${!options[@]}"; do
+                    if [ $i -eq $selected ]; then
+                        content+="[*]|${labels[$i]}"$'\n'
+                        content+="|  ^-- ${descriptions[$i]}"$'\n'
+                    else
+                        content+="[ ]|${labels[$i]}"$'\n'
+                        content+="|  ^-- ${descriptions[$i]}"$'\n'
+                    fi
+                done
+                # Remove trailing newline
+                content="${content%$'\n'}"
+
+                {
+                    echo "SSH Public Key (^/v select, Enter confirm)"
+                    echo "$content" | column -t -s '|'
+                } | boxes -d stone -p a1
+            }
+
+            # Count lines in the box for clearing later
+            box_lines=$(draw_ssh_menu | wc -l)
+
+            # Save cursor position
+            tput sc
+
+            while true; do
+                # Move cursor to saved position
+                tput rc
+
+                # Draw the menu with colors
+                draw_ssh_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[*]\033[m/g' \
+                                    -e $'s/\\[ \\]/\033[1;34m[ ]\033[m/g' \
+                                    -e $'s/^\\(.*!.*\\)$/\033[1;33m\\1\033[m/g'
+
+                # Read a single keypress
+                IFS= read -rsn1 key
+
+                # Check for escape sequence (arrow keys)
+                if [[ "$key" == $'\x1b' ]]; then
+                    read -rsn2 -t 0.1 key || true
+                    case "$key" in
+                        '[A') # Up arrow
+                            ((selected--)) || true
+                            [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
+                            ;;
+                        '[B') # Down arrow
+                            ((selected++)) || true
+                            [ $selected -ge ${#options[@]} ] && selected=0
+                            ;;
+                    esac
+                elif [[ "$key" == "" ]]; then
+                    # Enter pressed - confirm selection
+                    break
+                elif [[ "$key" == "1" ]]; then
+                    selected=0; break
+                elif [[ "$key" == "2" ]]; then
+                    selected=1; break
+                fi
+            done
+
+            # Show cursor again
+            tput cnorm
+
+            # Clear the selection box
+            tput rc
+            for ((i=0; i<box_lines; i++)); do
+                printf "\033[K\n"
+            done
+            tput rc
+
+            if [[ "${options[$selected]}" == "detected" ]]; then
+                SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
+            else
+                # User wants to enter a different key
                 SSH_PUBLIC_KEY=""
             fi
         fi
 
+        # If no key yet (either not detected or user chose to enter manually)
         if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
-            echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
-            echo ""
-            read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+            # Show input box for manual entry
+            local input_box_lines=0
 
-            while [[ -z "$SSH_PUBLIC_KEY" ]]; do
-                echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
-                read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+            draw_ssh_input_box() {
+                local content=""
+                content+="! Password authentication will be DISABLED"$'\n'
+                content+=""$'\n'
+                if [[ -z "$DETECTED_SSH_KEY" ]]; then
+                    content+="No SSH key detected in Rescue System."$'\n'
+                fi
+                content+=""$'\n'
+                content+="Paste your SSH public key below:"$'\n'
+                content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
+
+                {
+                    echo "SSH Public Key Configuration"
+                    echo "$content"
+                } | boxes -d stone -p a1
+            }
+
+            # Display the input box
+            input_box_lines=$(draw_ssh_input_box | wc -l)
+            tput sc
+            draw_ssh_input_box | sed -e $'s/^\\(.*!.*\\)$/\033[1;33m\\1\033[m/g'
+
+            # Prompt for key
+            local ssh_prompt="SSH Public Key: "
+            while true; do
+                read -e -p "$ssh_prompt" SSH_PUBLIC_KEY
+                if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+                    if validate_ssh_key "$SSH_PUBLIC_KEY"; then
+                        break
+                    else
+                        echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continue anyway? (y/n): ${CLR_RESET}"
+                        read -rsn1 confirm
+                        echo ""
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            break
+                        fi
+                    fi
+                else
+                    echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+                fi
             done
 
-            if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
-                echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
-            fi
-        fi
+            # Clear the input box and show confirmation
+            tput rc
+            for ((i=0; i<input_box_lines+3; i++)); do
+                printf "\033[K\n"
+            done
+            tput rc
 
-        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+            parse_ssh_key "$SSH_PUBLIC_KEY"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
+        fi
     fi
 
     # Tailscale VPN Configuration (Optional)
@@ -332,39 +461,140 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
         fi
     else
-        echo ""
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo "Tailscale provides secure remote access to your Proxmox server."
-        echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
-        echo ""
-        read -e -p "Install Tailscale? (y/n): " -i "${INSTALL_TAILSCALE:-y}" INSTALL_TAILSCALE
+        # Interactive Tailscale configuration
+        local options=("yes" "no")
+        local labels=("Install Tailscale" "Skip installation")
+        local descriptions=("Recommended for secure remote access" "Install Tailscale later if needed")
+        local selected=0
+        local key=""
+        local box_lines=0
 
-        if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
-            INSTALL_TAILSCALE="yes"
-            echo ""
-            echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
-            echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
-            echo ""
-            read -e -p "Tailscale Auth Key (leave empty for manual auth): " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+        # Hide cursor
+        tput civis
 
-            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                echo -e "${CLR_GREEN}✓ Auth key provided. Tailscale will be configured automatically${CLR_RESET}"
-            else
-                echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+        # Function to draw the Tailscale selection box
+        draw_tailscale_menu() {
+            local content=""
+            content+="Tailscale provides secure remote access to your server."$'\n'
+            content+="Auth key: https://login.tailscale.com/admin/settings/keys"$'\n'
+            content+=""$'\n'
+            for i in "${!options[@]}"; do
+                if [ $i -eq $selected ]; then
+                    content+="[*]|${labels[$i]}"$'\n'
+                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                else
+                    content+="[ ]|${labels[$i]}"$'\n'
+                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                fi
+            done
+            # Remove trailing newline
+            content="${content%$'\n'}"
+
+            {
+                echo "Tailscale VPN - Optional (^/v select, Enter confirm)"
+                echo "$content" | column -t -s '|'
+            } | boxes -d stone -p a1
+        }
+
+        # Count lines in the box for clearing later
+        box_lines=$(draw_tailscale_menu | wc -l)
+
+        # Save cursor position
+        tput sc
+
+        while true; do
+            # Move cursor to saved position
+            tput rc
+
+            # Draw the menu with colors
+            draw_tailscale_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[*]\033[m/g' \
+                                      -e $'s/\\[ \\]/\033[1;34m[ ]\033[m/g'
+
+            # Read a single keypress
+            IFS= read -rsn1 key
+
+            # Check for escape sequence (arrow keys)
+            if [[ "$key" == $'\x1b' ]]; then
+                read -rsn2 -t 0.1 key || true
+                case "$key" in
+                    '[A') # Up arrow
+                        ((selected--)) || true
+                        [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
+                        ;;
+                    '[B') # Down arrow
+                        ((selected++)) || true
+                        [ $selected -ge ${#options[@]} ] && selected=0
+                        ;;
+                esac
+            elif [[ "$key" == "" ]]; then
+                # Enter pressed - confirm selection
+                break
+            elif [[ "$key" == "1" ]]; then
+                selected=0; break
+            elif [[ "$key" == "2" ]]; then
+                selected=1; break
             fi
+        done
 
+        # Show cursor again
+        tput cnorm
+
+        # Clear the selection box
+        tput rc
+        for ((i=0; i<box_lines; i++)); do
+            printf "\033[K\n"
+        done
+        tput rc
+
+        if [[ "${options[$selected]}" == "yes" ]]; then
+            INSTALL_TAILSCALE="yes"
             TAILSCALE_SSH="yes"
             TAILSCALE_WEBUI="yes"
-            echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
-            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
+
+            # Show auth key input box
+            local auth_box_lines=0
+
+            draw_auth_key_box() {
+                local content=""
+                content+="Auth key enables automatic configuration."$'\n'
+                content+="Leave empty for manual auth after reboot."$'\n'
+                content+=""$'\n'
+                content+="For unattended setup, use a reusable auth key"$'\n'
+                content+="with tags and expiry for better security."
+
+                {
+                    echo "Tailscale Auth Key (optional)"
+                    echo "$content"
+                } | boxes -d stone -p a1
+            }
+
+            # Display the auth key input box
+            auth_box_lines=$(draw_auth_key_box | wc -l)
+            tput sc
+            draw_auth_key_box
+
+            # Prompt for auth key
+            read -e -p "Auth Key: " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+
+            # Clear the input box
+            tput rc
+            for ((i=0; i<auth_box_lines+2; i++)); do
+                printf "\033[K\n"
+            done
+            tput rc
+
+            # Show confirmation
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (auto-connect)"
+            else
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (manual auth required)"
+            fi
         else
             INSTALL_TAILSCALE="no"
             TAILSCALE_AUTH_KEY=""
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
-            echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
         fi
     fi
 
