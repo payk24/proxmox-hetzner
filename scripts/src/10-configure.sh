@@ -86,7 +86,6 @@ configure_proxmox_via_ssh() {
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
 
-        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
 ZFSEOF
 
     # Disable enterprise repositories
@@ -97,14 +96,12 @@ ZFSEOF
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
                 mv "$repo_file" "${repo_file}.disabled"
-                echo "Disabled $(basename "$repo_file")"
             fi
         done
 
         # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
             sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
-            echo "Commented out enterprise repos in sources.list"
         fi
 REPOEOF
 
@@ -153,8 +150,6 @@ REPOEOF
             echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
             echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
-
-        echo "nf_conntrack configured"
 CONNTRACKEOF
 
     # Configure CPU governor
@@ -174,9 +169,6 @@ CONNTRACKEOF
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
-            echo "Subscription notice removed"
-        else
-            echo "proxmoxlib.js not found, skipping"
         fi
 SUBEOF
 
@@ -196,7 +188,6 @@ CSS
         INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
         if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
             sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-            echo "Custom CSS added to hide Ceph"
         fi
 
         # Alternative: patch JavaScript to hide Ceph panel completely
@@ -208,7 +199,6 @@ CSS
         fi
 
         systemctl restart pveproxy.service
-        echo "Ceph UI elements hidden"
 CEPHEOF
 
     # Install Tailscale if requested
@@ -244,7 +234,7 @@ CEPHEOF
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 print_info "Configuring Tailscale Serve for Proxmox Web UI..."
-                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
+                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" >/dev/null 2>&1
                 print_success "Proxmox Web UI available via Tailscale Serve"
             fi
         else
