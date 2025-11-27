@@ -537,9 +537,9 @@ get_rescue_ssh_key() {
 # =============================================================================
 # Usage: interactive_menu "Title" "header_content" "label1|desc1" "label2|desc2" ...
 # Sets: MENU_SELECTED (0-based index of selected option)
-# Fixed width: 70 characters for consistent appearance
+# Fixed width: 60 characters for consistent appearance
 
-MENU_BOX_WIDTH=70
+MENU_BOX_WIDTH=60
 
 interactive_menu() {
     local title="$1"
@@ -981,7 +981,7 @@ show_system_status() {
     fi
 
     # Display with boxes and colorize
-    # Inner width = MENU_BOX_WIDTH - 4 (borders) - 2 (padding) = 64
+    # Inner width = MENU_BOX_WIDTH - 4 (borders) - 2 (padding) = 54
     local inner_width=$((MENU_BOX_WIDTH - 6))
     {
         echo "SYSTEM INFORMATION"
