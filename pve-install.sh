@@ -471,6 +471,128 @@ wait_with_progress() {
     done
 }
 
+# =============================================================================
+# Interactive menu selection
+# =============================================================================
+# Usage: interactive_menu "Title" "header_content" "label1|desc1" "label2|desc2" ...
+# Sets: MENU_SELECTED (0-based index of selected option)
+# Fixed width: 70 characters for consistent appearance
+MENU_BOX_WIDTH=70
+
+interactive_menu() {
+    local title="$1"
+    local header="$2"
+    shift 2
+    local items=("$@")
+
+    local -a labels=()
+    local -a descriptions=()
+
+    # Parse items into labels and descriptions
+    for item in "${items[@]}"; do
+        labels+=("${item%%|*}")
+        descriptions+=("${item#*|}")
+    done
+
+    local selected=0
+    local key=""
+    local box_lines=0
+    local num_options=${#labels[@]}
+
+    # Function to draw the menu box with fixed width
+    _draw_menu() {
+        local content=""
+
+        # Add header content if provided
+        if [[ -n "$header" ]]; then
+            content+="$header"$'\n'
+            content+=""$'\n'
+        fi
+
+        # Add options
+        for i in "${!labels[@]}"; do
+            if [ $i -eq $selected ]; then
+                content+="[*] ${labels[$i]}"$'\n'
+                content+="    └─ ${descriptions[$i]}"$'\n'
+            else
+                content+="[ ] ${labels[$i]}"$'\n'
+                content+="    └─ ${descriptions[$i]}"$'\n'
+            fi
+        done
+
+        # Remove trailing newline
+        content="${content%$'\n'}"
+
+        {
+            echo "$title"
+            echo "$content"
+        } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
+    }
+
+    # Hide cursor
+    tput civis
+
+    # Calculate box height
+    box_lines=$(_draw_menu | wc -l)
+
+    # Draw initial menu
+    _draw_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[●]\033[m/g' \
+                     -e $'s/\\[ \\]/\033[1;34m[○]\033[m/g'
+
+    while true; do
+        # Read a single keypress
+        IFS= read -rsn1 key
+
+        # Check for escape sequence (arrow keys)
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 key || true
+            case "$key" in
+                '[A') # Up arrow
+                    ((selected--)) || true
+                    [ $selected -lt 0 ] && selected=$((num_options - 1))
+                    ;;
+                '[B') # Down arrow
+                    ((selected++)) || true
+                    [ $selected -ge $num_options ] && selected=0
+                    ;;
+            esac
+        elif [[ "$key" == "" ]]; then
+            # Enter pressed - confirm selection
+            break
+        elif [[ "$key" =~ ^[1-9]$ ]] && [ "$key" -le "$num_options" ]; then
+            # Number key pressed
+            selected=$((key - 1))
+            break
+        fi
+
+        # Move cursor up to redraw menu (fixes scroll issue)
+        tput cuu $box_lines
+
+        # Clear lines and redraw
+        for ((i=0; i<box_lines; i++)); do
+            printf "\033[2K\n"
+        done
+        tput cuu $box_lines
+
+        # Draw the menu with colors
+        _draw_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[●]\033[m/g' \
+                         -e $'s/\\[ \\]/\033[1;34m[○]\033[m/g'
+    done
+
+    # Show cursor again
+    tput cnorm
+
+    # Clear the menu box
+    tput cuu $box_lines
+    for ((i=0; i<box_lines; i++)); do
+        printf "\033[2K\n"
+    done
+    tput cuu $box_lines
+
+    # Set result
+    MENU_SELECTED=$selected
+}
+
 # --- 02-validation.sh ---
 # =============================================================================
 # System info collection with progress
@@ -933,99 +1055,18 @@ get_system_inputs() {
 
         # ZFS RAID mode selection (only if 2+ drives detected)
         if [ "${NVME_COUNT:-0}" -ge 2 ]; then
-            # Interactive radio-button style ZFS mode selector
-            local options=("raid1" "raid0" "single")
-            local labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
-            local descriptions=("Survives 1 disk failure" "2x space & speed, data loss if any disk fails" "Uses first drive only, ignores other drives")
-            local selected=0
-            local key=""
-            local box_lines=0
+            local zfs_options=("raid1" "raid0" "single")
+            local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
 
-            # Hide cursor
-            tput civis
+            interactive_menu \
+                "ZFS Storage Mode (↑/↓ select, Enter confirm)" \
+                "" \
+                "${zfs_labels[0]}|Survives 1 disk failure" \
+                "${zfs_labels[1]}|2x space & speed, data loss if any disk fails" \
+                "${zfs_labels[2]}|Uses first drive only, ignores other drives"
 
-            # Function to draw the selection box using boxes
-            draw_zfs_menu() {
-                local content=""
-                for i in "${!options[@]}"; do
-                    if [ $i -eq $selected ]; then
-                        content+="[*] ${labels[$i]}"$'\n'
-                        content+="    └─ ${descriptions[$i]}"$'\n'
-                    else
-                        content+="[ ] ${labels[$i]}"$'\n'
-                        content+="    └─ ${descriptions[$i]}"$'\n'
-                    fi
-                done
-                # Remove trailing newline
-                content="${content%$'\n'}"
-
-                {
-                    echo "ZFS Storage Mode (↑/↓ select, Enter confirm)"
-                    echo "$content"
-                } | boxes -d stone -p a1
-            }
-
-            # Count lines in the box for clearing later
-            box_lines=$(draw_zfs_menu | wc -l)
-
-            # Save cursor position
-            tput sc
-
-            while true; do
-                # Move cursor to saved position and clear lines
-                tput rc
-                for ((i=0; i<box_lines; i++)); do
-                    printf "\033[K\n"
-                done
-                tput rc
-
-                # Draw the menu with colors (use $'...' for literal escape codes to avoid sed backreference issues)
-                draw_zfs_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[●]\033[m/g' \
-                                    -e $'s/\\[ \\]/\033[1;34m[○]\033[m/g'
-
-                # Read a single keypress
-                IFS= read -rsn1 key
-
-                # Check for escape sequence (arrow keys)
-                if [[ "$key" == $'\x1b' ]]; then
-                    read -rsn2 -t 0.1 key || true  # ignore timeout exit code with set -e
-                    case "$key" in
-                        '[A') # Up arrow
-                            ((selected--)) || true  # prevent exit when result is 0
-                            [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
-                            ;;
-                        '[B') # Down arrow
-                            ((selected++)) || true  # prevent exit when result is 0
-                            [ $selected -ge ${#options[@]} ] && selected=0
-                            ;;
-                    esac
-                elif [[ "$key" == "" ]]; then
-                    # Enter pressed - confirm selection
-                    break
-                elif [[ "$key" == "1" ]]; then
-                    selected=0; break
-                elif [[ "$key" == "2" ]]; then
-                    selected=1; break
-                elif [[ "$key" == "3" ]]; then
-                    selected=2; break
-                fi
-            done
-
-            # Show cursor again
-            tput cnorm
-
-            # Set the selected ZFS RAID mode
-            ZFS_RAID="${options[$selected]}"
-
-            # Clear the selection box completely
-            tput rc
-            for ((i=0; i<box_lines; i++)); do
-                printf "\033[K\n"
-            done
-            tput rc
-
-            # Show confirmation
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${labels[$selected]}"
+            ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
         fi
     fi
 
@@ -1081,102 +1122,22 @@ get_system_inputs() {
             # Key detected - show interactive selector
             parse_ssh_key "$DETECTED_SSH_KEY"
 
-            local options=("detected" "manual")
-            local labels=("Use detected key" "Enter different key")
-            local descriptions=("Recommended - already configured in Hetzner" "Paste your own SSH public key")
-            local selected=0
-            local key=""
-            local box_lines=0
+            # Build header with key info
+            local ssh_header="! Password authentication will be DISABLED"$'\n'
+            ssh_header+="Detected key from Rescue System:"$'\n'
+            ssh_header+="  Type:    ${SSH_KEY_TYPE}"$'\n'
+            ssh_header+="  Key:     ${SSH_KEY_SHORT}"
+            if [[ -n "$SSH_KEY_COMMENT" ]]; then
+                ssh_header+=$'\n'"  Comment: ${SSH_KEY_COMMENT}"
+            fi
 
-            # Hide cursor
-            tput civis
+            interactive_menu \
+                "SSH Public Key (↑/↓ select, Enter confirm)" \
+                "$ssh_header" \
+                "Use detected key|Recommended - already configured in Hetzner" \
+                "Enter different key|Paste your own SSH public key"
 
-            # Function to draw the SSH selection box
-            draw_ssh_menu() {
-                local content=""
-                content+="! Password authentication will be DISABLED"$'\n'
-                content+=""$'\n'
-                content+="Detected key from Rescue System:"$'\n'
-                content+="  Type:    ${SSH_KEY_TYPE}"$'\n'
-                content+="  Key:     ${SSH_KEY_SHORT}"$'\n'
-                if [[ -n "$SSH_KEY_COMMENT" ]]; then
-                    content+="  Comment: ${SSH_KEY_COMMENT}"$'\n'
-                fi
-                content+=""$'\n'
-                for i in "${!options[@]}"; do
-                    if [ $i -eq $selected ]; then
-                        content+="[*] ${labels[$i]}"$'\n'
-                        content+="    ^-- ${descriptions[$i]}"$'\n'
-                    else
-                        content+="[ ] ${labels[$i]}"$'\n'
-                        content+="    ^-- ${descriptions[$i]}"$'\n'
-                    fi
-                done
-                # Remove trailing newline
-                content="${content%$'\n'}"
-
-                {
-                    echo "SSH Public Key (^/v select, Enter confirm)"
-                    echo "$content"
-                } | boxes -d stone -p a1
-            }
-
-            # Count lines in the box for clearing later
-            box_lines=$(draw_ssh_menu | wc -l)
-
-            # Save cursor position
-            tput sc
-
-            while true; do
-                # Move cursor to saved position and clear lines
-                tput rc
-                for ((i=0; i<box_lines; i++)); do
-                    printf "\033[K\n"
-                done
-                tput rc
-
-                # Draw the menu with colors
-                draw_ssh_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[*]\033[m/g' \
-                                    -e $'s/\\[ \\]/\033[1;34m[ ]\033[m/g' \
-                                    -e $'s/^\\(.*!.*\\)$/\033[1;33m\\1\033[m/g'
-
-                # Read a single keypress
-                IFS= read -rsn1 key
-
-                # Check for escape sequence (arrow keys)
-                if [[ "$key" == $'\x1b' ]]; then
-                    read -rsn2 -t 0.1 key || true
-                    case "$key" in
-                        '[A') # Up arrow
-                            ((selected--)) || true
-                            [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
-                            ;;
-                        '[B') # Down arrow
-                            ((selected++)) || true
-                            [ $selected -ge ${#options[@]} ] && selected=0
-                            ;;
-                    esac
-                elif [[ "$key" == "" ]]; then
-                    # Enter pressed - confirm selection
-                    break
-                elif [[ "$key" == "1" ]]; then
-                    selected=0; break
-                elif [[ "$key" == "2" ]]; then
-                    selected=1; break
-                fi
-            done
-
-            # Show cursor again
-            tput cnorm
-
-            # Clear the selection box
-            tput rc
-            for ((i=0; i<box_lines; i++)); do
-                printf "\033[K\n"
-            done
-            tput rc
-
-            if [[ "${options[$selected]}" == "detected" ]]; then
+            if [[ $MENU_SELECTED -eq 0 ]]; then
                 SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
                 echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
             else
@@ -1188,29 +1149,23 @@ get_system_inputs() {
         # If no key yet (either not detected or user chose to enter manually)
         if [[ -z "$SSH_PUBLIC_KEY" ]]; then
             # Show input box for manual entry
-            local input_box_lines=0
+            local ssh_input_content="! Password authentication will be DISABLED"$'\n'
+            if [[ -z "$DETECTED_SSH_KEY" ]]; then
+                ssh_input_content+=$'\n'"No SSH key detected in Rescue System."
+            fi
+            ssh_input_content+=$'\n'$'\n'"Paste your SSH public key below:"$'\n'
+            ssh_input_content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
 
-            draw_ssh_input_box() {
-                local content=""
-                content+="! Password authentication will be DISABLED"$'\n'
-                content+=""$'\n'
-                if [[ -z "$DETECTED_SSH_KEY" ]]; then
-                    content+="No SSH key detected in Rescue System."$'\n'
-                fi
-                content+=""$'\n'
-                content+="Paste your SSH public key below:"$'\n'
-                content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
+            local input_box_lines
+            input_box_lines=$({
+                echo "SSH Public Key Configuration"
+                echo "$ssh_input_content"
+            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
 
-                {
-                    echo "SSH Public Key Configuration"
-                    echo "$content"
-                } | boxes -d stone -p a1
-            }
-
-            # Display the input box
-            input_box_lines=$(draw_ssh_input_box | wc -l)
-            tput sc
-            draw_ssh_input_box | sed -e $'s/^\\(.*!.*\\)$/\033[1;33m\\1\033[m/g'
+            {
+                echo "SSH Public Key Configuration"
+                echo "$ssh_input_content"
+            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
 
             # Prompt for key
             local ssh_prompt="SSH Public Key: "
@@ -1232,12 +1187,12 @@ get_system_inputs() {
                 fi
             done
 
-            # Clear the input box and show confirmation
-            tput rc
+            # Clear the input box and show confirmation (move up and clear)
+            tput cuu $((input_box_lines + 3))
             for ((i=0; i<input_box_lines+3; i++)); do
-                printf "\033[K\n"
+                printf "\033[2K\n"
             done
-            tput rc
+            tput cuu $((input_box_lines + 3))
 
             parse_ssh_key "$SSH_PUBLIC_KEY"
             echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
@@ -1255,130 +1210,47 @@ get_system_inputs() {
         fi
     else
         # Interactive Tailscale configuration
-        local options=("yes" "no")
-        local labels=("Install Tailscale" "Skip installation")
-        local descriptions=("Recommended for secure remote access" "Install Tailscale later if needed")
-        local selected=0
-        local key=""
-        local box_lines=0
+        local ts_header="Tailscale provides secure remote access to your server."$'\n'
+        ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
 
-        # Hide cursor
-        tput civis
+        interactive_menu \
+            "Tailscale VPN - Optional (↑/↓ select, Enter confirm)" \
+            "$ts_header" \
+            "Install Tailscale|Recommended for secure remote access" \
+            "Skip installation|Install Tailscale later if needed"
 
-        # Function to draw the Tailscale selection box
-        draw_tailscale_menu() {
-            local content=""
-            content+="Tailscale provides secure remote access to your server."$'\n'
-            content+="Auth key: https://login.tailscale.com/admin/settings/keys"$'\n'
-            content+=""$'\n'
-            for i in "${!options[@]}"; do
-                if [ $i -eq $selected ]; then
-                    content+="[*] ${labels[$i]}"$'\n'
-                    content+="    ^-- ${descriptions[$i]}"$'\n'
-                else
-                    content+="[ ] ${labels[$i]}"$'\n'
-                    content+="    ^-- ${descriptions[$i]}"$'\n'
-                fi
-            done
-            # Remove trailing newline
-            content="${content%$'\n'}"
-
-            {
-                echo "Tailscale VPN - Optional (^/v select, Enter confirm)"
-                echo "$content"
-            } | boxes -d stone -p a1
-        }
-
-        # Count lines in the box for clearing later
-        box_lines=$(draw_tailscale_menu | wc -l)
-
-        # Save cursor position
-        tput sc
-
-        while true; do
-            # Move cursor to saved position and clear lines
-            tput rc
-            for ((i=0; i<box_lines; i++)); do
-                printf "\033[K\n"
-            done
-            tput rc
-
-            # Draw the menu with colors
-            draw_tailscale_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[*]\033[m/g' \
-                                      -e $'s/\\[ \\]/\033[1;34m[ ]\033[m/g'
-
-            # Read a single keypress
-            IFS= read -rsn1 key
-
-            # Check for escape sequence (arrow keys)
-            if [[ "$key" == $'\x1b' ]]; then
-                read -rsn2 -t 0.1 key || true
-                case "$key" in
-                    '[A') # Up arrow
-                        ((selected--)) || true
-                        [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
-                        ;;
-                    '[B') # Down arrow
-                        ((selected++)) || true
-                        [ $selected -ge ${#options[@]} ] && selected=0
-                        ;;
-                esac
-            elif [[ "$key" == "" ]]; then
-                # Enter pressed - confirm selection
-                break
-            elif [[ "$key" == "1" ]]; then
-                selected=0; break
-            elif [[ "$key" == "2" ]]; then
-                selected=1; break
-            fi
-        done
-
-        # Show cursor again
-        tput cnorm
-
-        # Clear the selection box
-        tput rc
-        for ((i=0; i<box_lines; i++)); do
-            printf "\033[K\n"
-        done
-        tput rc
-
-        if [[ "${options[$selected]}" == "yes" ]]; then
+        if [[ $MENU_SELECTED -eq 0 ]]; then
             INSTALL_TAILSCALE="yes"
             TAILSCALE_SSH="yes"
             TAILSCALE_WEBUI="yes"
 
             # Show auth key input box
-            local auth_box_lines=0
+            local auth_content="Auth key enables automatic configuration."$'\n'
+            auth_content+="Leave empty for manual auth after reboot."$'\n'
+            auth_content+=$'\n'
+            auth_content+="For unattended setup, use a reusable auth key"$'\n'
+            auth_content+="with tags and expiry for better security."
 
-            draw_auth_key_box() {
-                local content=""
-                content+="Auth key enables automatic configuration."$'\n'
-                content+="Leave empty for manual auth after reboot."$'\n'
-                content+=""$'\n'
-                content+="For unattended setup, use a reusable auth key"$'\n'
-                content+="with tags and expiry for better security."
+            local auth_box_lines
+            auth_box_lines=$({
+                echo "Tailscale Auth Key (optional)"
+                echo "$auth_content"
+            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
 
-                {
-                    echo "Tailscale Auth Key (optional)"
-                    echo "$content"
-                } | boxes -d stone -p a1
-            }
-
-            # Display the auth key input box
-            auth_box_lines=$(draw_auth_key_box | wc -l)
-            tput sc
-            draw_auth_key_box
+            {
+                echo "Tailscale Auth Key (optional)"
+                echo "$auth_content"
+            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
 
             # Prompt for auth key
             read -e -p "Auth Key: " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
 
-            # Clear the input box
-            tput rc
+            # Clear the input box (move up and clear)
+            tput cuu $((auth_box_lines + 2))
             for ((i=0; i<auth_box_lines+2; i++)); do
-                printf "\033[K\n"
+                printf "\033[2K\n"
             done
-            tput rc
+            tput cuu $((auth_box_lines + 2))
 
             # Show confirmation
             if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
