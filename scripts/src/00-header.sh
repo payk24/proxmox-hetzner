@@ -173,6 +173,14 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
+# =============================================================================
+# Cursor management - ensure cursor is always visible on exit
+# =============================================================================
+cleanup_cursor() {
+    tput cnorm 2>/dev/null || true
+}
+trap cleanup_cursor EXIT INT TERM
+
 clear
 
 # =============================================================================
