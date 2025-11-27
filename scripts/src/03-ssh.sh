@@ -2,7 +2,7 @@
 # SSH helper functions
 # =============================================================================
 
-SSH_OPTS="-o StrictHostKeyChecking=no"
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 SSH_PORT="5555"
 
 remote_exec() {

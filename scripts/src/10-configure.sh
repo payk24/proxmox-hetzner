@@ -44,7 +44,7 @@ make_template_files() {
 configure_proxmox_via_ssh() {
     print_info "Starting post-installation configuration via SSH..."
     make_template_files
-    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
+    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
@@ -57,7 +57,7 @@ configure_proxmox_via_ssh() {
     remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
     remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
 
     # Configure ZFS ARC memory limits
     print_info "Configuring ZFS ARC memory limits..."
