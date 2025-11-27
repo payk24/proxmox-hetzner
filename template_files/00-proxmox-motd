@@ -1,0 +1,91 @@
+#!/bin/bash
+# Proxmox System Information MOTD
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+# Get system info
+HOSTNAME=$(hostname)
+UPTIME=$(uptime -p | sed 's/up //')
+LOAD=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
+KERNEL=$(uname -r)
+
+# CPU info
+CPU_CORES=$(nproc)
+CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}' | cut -d. -f1)
+
+# Memory info
+MEM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
+MEM_USED=$(free -h | awk '/^Mem:/ {print $3}')
+MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
+
+# ZFS info
+if command -v zpool &> /dev/null; then
+    ZFS_POOL=$(zpool list -H -o name 2>/dev/null | head -1)
+    if [ -n "$ZFS_POOL" ]; then
+        ZFS_SIZE=$(zpool list -H -o size "$ZFS_POOL" 2>/dev/null)
+        ZFS_USED=$(zpool list -H -o allocated "$ZFS_POOL" 2>/dev/null)
+        ZFS_FREE=$(zpool list -H -o free "$ZFS_POOL" 2>/dev/null)
+        ZFS_HEALTH=$(zpool list -H -o health "$ZFS_POOL" 2>/dev/null)
+    fi
+fi
+
+# VM/CT counts
+VMS=$(qm list 2>/dev/null | tail -n +2 | wc -l)
+CTS=$(pct list 2>/dev/null | tail -n +2 | wc -l)
+RUNNING_VMS=$(qm list 2>/dev/null | grep running | wc -l)
+RUNNING_CTS=$(pct list 2>/dev/null | grep running | wc -l)
+
+# Network info
+IP_ADDR=$(hostname -I | awk '{print $1}')
+
+echo ""
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║${NC}              ${BLUE}${BOLD}Proxmox VE - ${HOSTNAME}${NC}              ${CYAN}${BOLD}║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BOLD}System:${NC}"
+echo -e "  Kernel:    ${KERNEL}"
+echo -e "  Uptime:    ${UPTIME}"
+echo -e "  Load:      ${LOAD}"
+echo -e "  IP:        ${IP_ADDR}"
+echo ""
+echo -e "${BOLD}Resources:${NC}"
+if [ "$CPU_USAGE" -gt 80 ]; then
+    echo -e "  CPU:       ${RED}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+elif [ "$CPU_USAGE" -gt 50 ]; then
+    echo -e "  CPU:       ${YELLOW}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+else
+    echo -e "  CPU:       ${GREEN}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+fi
+
+if [ "$MEM_PERCENT" -gt 80 ]; then
+    echo -e "  Memory:    ${RED}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+elif [ "$MEM_PERCENT" -gt 50 ]; then
+    echo -e "  Memory:    ${YELLOW}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+else
+    echo -e "  Memory:    ${GREEN}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+fi
+
+if [ -n "$ZFS_POOL" ]; then
+    echo ""
+    echo -e "${BOLD}ZFS Pool (${ZFS_POOL}):${NC}"
+    if [ "$ZFS_HEALTH" = "ONLINE" ]; then
+        echo -e "  Health:    ${GREEN}${ZFS_HEALTH}${NC}"
+    else
+        echo -e "  Health:    ${RED}${ZFS_HEALTH}${NC}"
+    fi
+    echo -e "  Used:      ${ZFS_USED} / ${ZFS_SIZE} (Free: ${ZFS_FREE})"
+fi
+
+echo ""
+echo -e "${BOLD}Virtualization:${NC}"
+echo -e "  VMs:       ${VMS} total, ${GREEN}${RUNNING_VMS} running${NC}"
+echo -e "  CTs:       ${CTS} total, ${GREEN}${RUNNING_CTS} running${NC}"
+echo ""
