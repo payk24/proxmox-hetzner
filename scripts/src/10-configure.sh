@@ -3,51 +3,40 @@
 # =============================================================================
 
 make_template_files() {
-    print_info "Downloading template files..."
     mkdir -p ./template_files
-
-    download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
-    download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
-    download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
-    download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
-
-    # Security hardening templates
-    download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
-
-    # ZSH configuration
-    download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
-
-    # NTP configuration
-    download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
-
-    # MOTD configuration
-    download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
-
-    # Unattended upgrades configuration
-    download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
-    download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
-
-    # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
-    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
-    print_info "Modifying template files..."
+    # Download template files in background with progress
+    (
+        download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
+        download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
+        download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
+        download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
+        download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
+        download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+        download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
+        download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
+        download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
+        download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
+        download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Downloading template files"
 
-    # Process hosts file
-    sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
-    sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
-    sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
-
-    # Process interfaces file
-    print_info "Processing interfaces file (mode: ${BRIDGE_MODE:-internal})..."
-    sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
-    sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
+    # Modify template files in background with progress
+    (
+        sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
+        sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
+        sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
+        sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
+        sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/interfaces
+        sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
+        sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
+        sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
+    ) &
+    show_progress $! "Modifying template files"
 }
 
 # Configure the installed Proxmox via SSH
@@ -69,38 +58,31 @@ configure_proxmox_via_ssh() {
     remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
 
     # Configure ZFS ARC memory limits
-    print_info "Configuring ZFS ARC memory limits..."
-    remote_exec_script << 'ZFSEOF'
-        # Get total RAM in bytes
-        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    remote_exec_with_progress "Configuring ZFS ARC memory limits" '
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
         TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
-        # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
         if [ $TOTAL_RAM_GB -ge 128 ]; then
-            ARC_MIN=$((16 * 1024 * 1024 * 1024))  # 16GB min for 128GB+ systems
-            ARC_MAX=$((64 * 1024 * 1024 * 1024))  # 64GB max
+            ARC_MIN=$((16 * 1024 * 1024 * 1024))
+            ARC_MAX=$((64 * 1024 * 1024 * 1024))
         elif [ $TOTAL_RAM_GB -ge 64 ]; then
-            ARC_MIN=$((8 * 1024 * 1024 * 1024))   # 8GB min
-            ARC_MAX=$((32 * 1024 * 1024 * 1024))  # 32GB max
+            ARC_MIN=$((8 * 1024 * 1024 * 1024))
+            ARC_MAX=$((32 * 1024 * 1024 * 1024))
         elif [ $TOTAL_RAM_GB -ge 32 ]; then
-            ARC_MIN=$((4 * 1024 * 1024 * 1024))   # 4GB min
-            ARC_MAX=$((16 * 1024 * 1024 * 1024))  # 16GB max
+            ARC_MIN=$((4 * 1024 * 1024 * 1024))
+            ARC_MAX=$((16 * 1024 * 1024 * 1024))
         else
-            ARC_MIN=$((1 * 1024 * 1024 * 1024))   # 1GB min
-            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))  # 50% of RAM max
+            ARC_MIN=$((1 * 1024 * 1024 * 1024))
+            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))
         fi
 
-        # Create ZFS configuration
         mkdir -p /etc/modprobe.d
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
-
-ZFSEOF
+    '
 
     # Disable enterprise repositories
-    print_info "Disabling enterprise repositories..."
-    remote_exec_script << 'REPOEOF'
-        # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
+    remote_exec_with_progress "Disabling enterprise repositories" '
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
@@ -108,11 +90,10 @@ ZFSEOF
             fi
         done
 
-        # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
-            sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
+            sed -i "s|^deb.*enterprise.proxmox.com|# &|g" /etc/apt/sources.list
         fi
-REPOEOF
+    '
 
     # Update all system packages
     remote_exec_with_progress "Updating system packages" '
@@ -162,9 +143,11 @@ DEFLOCEOF
     '
 
     # Configure ZSH as default shell for root
-    print_info "Configuring ZSH..."
-    remote_copy "template_files/zshrc" "/root/.zshrc"
-    remote_exec "chsh -s /bin/zsh root"
+    (
+        remote_copy "template_files/zshrc" "/root/.zshrc"
+        remote_exec "chsh -s /bin/zsh root"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Configuring ZSH"
 
     # Configure NTP time synchronization with chrony
     remote_exec_with_progress "Installing and configuring NTP (chrony)" '
