@@ -25,11 +25,16 @@ show_system_status() {
         drive_models+=("$model")
     done
 
-    # Determine RAID mode
-    if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
-        RAID_MODE="single"
-    else
-        RAID_MODE="raid1"
+    # Store drive count for RAID mode selection (done in get_system_inputs)
+    NVME_COUNT=${#NVME_DRIVES[@]}
+
+    # Set default RAID mode if not already set
+    if [ -z "$ZFS_RAID" ]; then
+        if [ $NVME_COUNT -lt 2 ]; then
+            ZFS_RAID="single"
+        else
+            ZFS_RAID="raid1"
+        fi
     fi
 
     # Build system info using column for alignment
@@ -96,11 +101,26 @@ show_system_status() {
         done
         # Add empty line and mode
         storage_rows+=$'\n'
-        if [ "$RAID_MODE" = "single" ]; then
-            storage_rows+="[WARN]|Mode: ZFS Single Drive (no RAID)"
-        else
-            storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
-        fi
+        case "$ZFS_RAID" in
+            single)
+                storage_rows+="[WARN]|Mode: ZFS Single (no redundancy)"
+                ;;
+            raid0)
+                storage_rows+="[WARN]|Mode: ZFS RAID-0 (stripe, no redundancy)"
+                ;;
+            raid1)
+                storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
+                ;;
+            raid10)
+                storage_rows+="[OK]|Mode: ZFS RAID-10 (stripe+mirror)"
+                ;;
+            raidz*)
+                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID^^}"
+                ;;
+            *)
+                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID}"
+                ;;
+        esac
     fi
 
     # Display with boxes and colorize

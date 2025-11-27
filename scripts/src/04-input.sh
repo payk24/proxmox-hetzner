@@ -145,6 +145,39 @@ get_system_inputs() {
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
         done
+
+        # ZFS RAID mode selection (only if 2+ drives detected)
+        if [ "${NVME_COUNT:-0}" -ge 2 ]; then
+            echo ""
+            echo -e "${CLR_CYAN}┌─ ZFS Storage Mode ─────────────────────────────┐${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}1)${CLR_RESET} raid1  - Mirror ${CLR_GREEN}(recommended)${CLR_RESET}          ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ Redundancy, survives 1 disk failure   ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}2)${CLR_RESET} raid0  - Stripe                         ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, 2x space & speed      ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}3)${CLR_RESET} single - Use first drive only           ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, ignores other drives ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}└────────────────────────────────────────────────┘${CLR_RESET}"
+
+            local zfs_choice
+            while true; do
+                read -e -p "Select ZFS mode [1-3]: " -i "1" zfs_choice
+                case "$zfs_choice" in
+                    1) ZFS_RAID="raid1"; break ;;
+                    2) ZFS_RAID="raid0"; break ;;
+                    3) ZFS_RAID="single"; break ;;
+                    *) echo -e "${CLR_RED}Invalid choice. Enter 1, 2, or 3.${CLR_RESET}" ;;
+                esac
+            done
+
+            # Show confirmation with checkmark
+            local mode_desc
+            case "$ZFS_RAID" in
+                raid1)  mode_desc="RAID-1 (mirror)" ;;
+                raid0)  mode_desc="RAID-0 (stripe)" ;;
+                single) mode_desc="Single drive" ;;
+            esac
+            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${mode_desc}\033[K\n"
+        fi
     fi
 
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"

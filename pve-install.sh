@@ -150,8 +150,8 @@ TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY}"
 TAILSCALE_SSH="${TAILSCALE_SSH}"
 TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
 
-# RAID mode (auto-detected, but can be overridden)
-# RAID_MODE="${RAID_MODE}"
+# ZFS RAID mode (single, raid0, raid1)
+ZFS_RAID="${ZFS_RAID}"
 EOF
     chmod 600 "$file"
     echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"
@@ -635,11 +635,16 @@ show_system_status() {
         drive_models+=("$model")
     done
 
-    # Determine RAID mode
-    if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
-        RAID_MODE="single"
-    else
-        RAID_MODE="raid1"
+    # Store drive count for RAID mode selection (done in get_system_inputs)
+    NVME_COUNT=${#NVME_DRIVES[@]}
+
+    # Set default RAID mode if not already set
+    if [ -z "$ZFS_RAID" ]; then
+        if [ $NVME_COUNT -lt 2 ]; then
+            ZFS_RAID="single"
+        else
+            ZFS_RAID="raid1"
+        fi
     fi
 
     # Build system info using column for alignment
@@ -706,11 +711,26 @@ show_system_status() {
         done
         # Add empty line and mode
         storage_rows+=$'\n'
-        if [ "$RAID_MODE" = "single" ]; then
-            storage_rows+="[WARN]|Mode: ZFS Single Drive (no RAID)"
-        else
-            storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
-        fi
+        case "$ZFS_RAID" in
+            single)
+                storage_rows+="[WARN]|Mode: ZFS Single (no redundancy)"
+                ;;
+            raid0)
+                storage_rows+="[WARN]|Mode: ZFS RAID-0 (stripe, no redundancy)"
+                ;;
+            raid1)
+                storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
+                ;;
+            raid10)
+                storage_rows+="[OK]|Mode: ZFS RAID-10 (stripe+mirror)"
+                ;;
+            raidz*)
+                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID^^}"
+                ;;
+            *)
+                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID}"
+                ;;
+        esac
     fi
 
     # Display with boxes and colorize
@@ -890,6 +910,39 @@ get_system_inputs() {
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
         done
+
+        # ZFS RAID mode selection (only if 2+ drives detected)
+        if [ "${NVME_COUNT:-0}" -ge 2 ]; then
+            echo ""
+            echo -e "${CLR_CYAN}┌─ ZFS Storage Mode ─────────────────────────────┐${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}1)${CLR_RESET} raid1  - Mirror ${CLR_GREEN}(recommended)${CLR_RESET}          ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ Redundancy, survives 1 disk failure   ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}2)${CLR_RESET} raid0  - Stripe                         ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, 2x space & speed      ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}  ${CLR_WHITE}3)${CLR_RESET} single - Use first drive only           ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}│${CLR_RESET}     └─ ${CLR_YELLOW}No redundancy${CLR_RESET}, ignores other drives ${CLR_CYAN}│${CLR_RESET}"
+            echo -e "${CLR_CYAN}└────────────────────────────────────────────────┘${CLR_RESET}"
+
+            local zfs_choice
+            while true; do
+                read -e -p "Select ZFS mode [1-3]: " -i "1" zfs_choice
+                case "$zfs_choice" in
+                    1) ZFS_RAID="raid1"; break ;;
+                    2) ZFS_RAID="raid0"; break ;;
+                    3) ZFS_RAID="single"; break ;;
+                    *) echo -e "${CLR_RED}Invalid choice. Enter 1, 2, or 3.${CLR_RESET}" ;;
+                esac
+            done
+
+            # Show confirmation with checkmark
+            local mode_desc
+            case "$ZFS_RAID" in
+                raid1)  mode_desc="RAID-1 (mirror)" ;;
+                raid0)  mode_desc="RAID-0 (stripe)" ;;
+                single) mode_desc="Single drive" ;;
+            esac
+            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${mode_desc}\033[K\n"
+        fi
     fi
 
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
@@ -1141,14 +1194,19 @@ download_proxmox_iso() {
 make_answer_toml() {
     echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
 
-    # Build disk_list based on detected drives (using vda/vdb for QEMU virtio)
-    if [ "$RAID_MODE" = "raid1" ]; then
-        DISK_LIST='["/dev/vda", "/dev/vdb"]'
-        ZFS_RAID="raid1"
-    else
-        DISK_LIST='["/dev/vda"]'
-        ZFS_RAID="single"
-    fi
+    # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
+    case "$ZFS_RAID" in
+        single)
+            DISK_LIST='["/dev/vda"]'
+            ;;
+        raid0|raid1)
+            DISK_LIST='["/dev/vda", "/dev/vdb"]'
+            ;;
+        *)
+            # Default to raid1 for 2 drives
+            DISK_LIST='["/dev/vda", "/dev/vdb"]'
+            ;;
+    esac
 
     cat <<EOF > answer.toml
 [global]
