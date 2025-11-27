@@ -1731,6 +1731,16 @@ make_template_files() {
     # ZSH configuration
     download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
 
+    # NTP configuration
+    download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
+
+    # MOTD configuration
+    download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
+
+    # Unattended upgrades configuration
+    download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
+    download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
+
     # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
@@ -1872,6 +1882,31 @@ DEFLOCEOF
     remote_copy "template_files/zshrc" "/root/.zshrc"
     remote_exec "chsh -s /bin/zsh root"
 
+    # Configure NTP time synchronization with chrony
+    remote_exec_with_progress "Installing and configuring NTP (chrony)" '
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq chrony
+        systemctl stop chrony
+    '
+    remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
+    remote_exec "systemctl enable chrony && systemctl start chrony"
+
+    # Configure dynamic MOTD
+    print_info "Configuring dynamic MOTD..."
+    remote_exec "rm -f /etc/motd"
+    remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
+    remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
+    remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
+
+    # Configure Unattended Upgrades (security updates, kernel excluded)
+    remote_exec_with_progress "Installing and configuring Unattended Upgrades" '
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq unattended-upgrades apt-listchanges
+    '
+    remote_copy "template_files/50unattended-upgrades" "/etc/apt/apt.conf.d/50unattended-upgrades"
+    remote_copy "template_files/20auto-upgrades" "/etc/apt/apt.conf.d/20auto-upgrades"
+    remote_exec "systemctl enable unattended-upgrades"
+
     # Configure nf_conntrack
     print_info "Configuring nf_conntrack..."
     remote_exec_script << 'CONNTRACKEOF'
@@ -2005,6 +2040,9 @@ reboot_to_main_os() {
     echo "  ✓ VM image tools: libguestfs-tools"
     echo "  ✓ ZFS ARC memory limits configured"
     echo "  ✓ nf_conntrack optimized for high connection counts"
+    echo "  ✓ NTP time sync (chrony) with Hetzner servers"
+    echo "  ✓ Dynamic MOTD with system status"
+    echo "  ✓ Unattended security upgrades (kernel excluded)"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
