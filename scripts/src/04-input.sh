@@ -67,8 +67,10 @@ get_system_inputs() {
         INTERFACE_NAME="$DEFAULT_INTERFACE"
     fi
 
-    # Prompt user for interface name
-    if [[ "$NON_INTERACTIVE" != true ]]; then
+    # Prompt user for interface name or display in non-interactive mode
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        echo -e "${CLR_GREEN}✓ Network interface: ${INTERFACE_NAME}${CLR_RESET}"
+    else
         echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
         local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
         read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
@@ -103,6 +105,26 @@ get_system_inputs() {
         BRIDGE_MODE="${BRIDGE_MODE:-internal}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
+        # Display configuration values in non-interactive mode
+        echo -e "${CLR_GREEN}✓ Hostname: ${PVE_HOSTNAME}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Domain: ${DOMAIN_SUFFIX}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Timezone: ${TIMEZONE}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Email: ${EMAIL}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Bridge mode: ${BRIDGE_MODE}${CLR_RESET}"
+        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+            echo -e "${CLR_GREEN}✓ Private subnet: ${PRIVATE_SUBNET}${CLR_RESET}"
+        fi
+
+        # ZFS RAID mode default in non-interactive mode
+        if [[ -z "$ZFS_RAID" ]]; then
+            if [[ "${NVME_COUNT:-0}" -ge 2 ]]; then
+                ZFS_RAID="raid1"  # Default to mirror for redundancy
+            else
+                ZFS_RAID="single"
+            fi
+        fi
+        echo -e "${CLR_GREEN}✓ ZFS mode: ${ZFS_RAID}${CLR_RESET}"
+
         # Password handling in non-interactive mode
         if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
             echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
@@ -128,38 +150,64 @@ get_system_inputs() {
         if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
             TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
             TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
-            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓ Tailscale will be installed (auto-connect)${CLR_RESET}"
+            else
+                echo -e "${CLR_GREEN}✓ Tailscale will be installed (manual auth required)${CLR_RESET}"
+            fi
+            echo -e "${CLR_GREEN}✓ Tailscale SSH: ${TAILSCALE_SSH}${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓ Tailscale WebUI: ${TAILSCALE_WEBUI}${CLR_RESET}"
+        else
+            echo -e "${CLR_GREEN}✓ Tailscale: skipped${CLR_RESET}"
         fi
     else
         # =====================================================================
         # SECTION 1: Text inputs (hostname, domain, email, password)
         # =====================================================================
 
-        local hostname_prompt="Enter your hostname (e.g., pve, proxmox): "
-        while true; do
-            read -e -p "$hostname_prompt" -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
-            if validate_hostname "$PVE_HOSTNAME"; then
-                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\033[K\n"
-                break
-            fi
-            echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
-        done
+        # Hostname - skip if already set via env
+        if [[ -n "$PVE_HOSTNAME" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Hostname: ${PVE_HOSTNAME} (from env)"
+        else
+            local hostname_prompt="Enter your hostname (e.g., pve, proxmox): "
+            while true; do
+                read -e -p "$hostname_prompt" -i "pve" PVE_HOSTNAME
+                if validate_hostname "$PVE_HOSTNAME"; then
+                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\033[K\n"
+                    break
+                fi
+                echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
+            done
+        fi
 
-        local domain_prompt="Enter domain suffix: "
-        read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
-        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
+        # Domain - skip if already set via env
+        if [[ -n "$DOMAIN_SUFFIX" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Domain: ${DOMAIN_SUFFIX} (from env)"
+        else
+            local domain_prompt="Enter domain suffix: "
+            read -e -p "$domain_prompt" -i "local" DOMAIN_SUFFIX
+            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
+        fi
 
-        local email_prompt="Enter your email address: "
-        while true; do
-            read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
-            if validate_email "$EMAIL"; then
-                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
-                break
-            fi
-            echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
-        done
+        # Email - skip if already set via env
+        if [[ -n "$EMAIL" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Email: ${EMAIL} (from env)"
+        else
+            local email_prompt="Enter your email address: "
+            while true; do
+                read -e -p "$email_prompt" -i "admin@example.com" EMAIL
+                if validate_email "$EMAIL"; then
+                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
+                    break
+                fi
+                echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
+            done
+        fi
 
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+        # Password - skip if already set via env
+        if [[ -n "$NEW_ROOT_PASSWORD" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Password: ******** (from env)"
+        else
             local password_prompt="Enter your System New root password: "
             NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
@@ -175,251 +223,291 @@ get_system_inputs() {
         echo ""  # Visual separator before menus
 
         # --- Timezone selection menu ---
-        local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
-        local tz_default="${TIMEZONE:-Europe/Kyiv}"
-
-        interactive_menu \
-            "Timezone (↑/↓ select, Enter confirm)" \
-            "" \
-            "Europe/Kyiv|Ukraine" \
-            "Europe/London|United Kingdom (GMT/BST)" \
-            "Europe/Berlin|Germany, Central Europe (CET/CEST)" \
-            "America/New_York|US Eastern Time (EST/EDT)" \
-            "America/Los_Angeles|US Pacific Time (PST/PDT)" \
-            "Asia/Tokyo|Japan Standard Time (JST)" \
-            "UTC|Coordinated Universal Time" \
-            "Custom|Enter timezone manually"
-
-        if [[ $MENU_SELECTED -eq 7 ]]; then
-            # Custom timezone - prompt for manual entry
-            local tz_prompt="Enter your timezone: "
-            while true; do
-                read -e -p "$tz_prompt" -i "$tz_default" TIMEZONE
-                if validate_timezone "$TIMEZONE"; then
-                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}\033[K\n"
-                    break
-                fi
-                echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York${CLR_RESET}"
-            done
+        if [[ -n "$TIMEZONE" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE} (from env)"
         else
-            TIMEZONE="${tz_options[$MENU_SELECTED]}"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
+            local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
+
+            interactive_menu \
+                "Timezone (↑/↓ select, Enter confirm)" \
+                "" \
+                "Europe/Kyiv|Ukraine" \
+                "Europe/London|United Kingdom (GMT/BST)" \
+                "Europe/Berlin|Germany, Central Europe (CET/CEST)" \
+                "America/New_York|US Eastern Time (EST/EDT)" \
+                "America/Los_Angeles|US Pacific Time (PST/PDT)" \
+                "Asia/Tokyo|Japan Standard Time (JST)" \
+                "UTC|Coordinated Universal Time" \
+                "Custom|Enter timezone manually"
+
+            if [[ $MENU_SELECTED -eq 7 ]]; then
+                # Custom timezone - prompt for manual entry
+                local tz_prompt="Enter your timezone: "
+                while true; do
+                    read -e -p "$tz_prompt" -i "Europe/Kyiv" TIMEZONE
+                    if validate_timezone "$TIMEZONE"; then
+                        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}\033[K\n"
+                        break
+                    fi
+                    echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York${CLR_RESET}"
+                done
+            else
+                TIMEZONE="${tz_options[$MENU_SELECTED]}"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
+            fi
         fi
 
         # --- Network bridge mode selection menu ---
-        local bridge_options=("internal" "external" "both")
-        local bridge_header="Configure network bridges for VMs and containers"$'\n'
-        bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
-        bridge_header+="vmbr1 = internal (NAT with private subnet)"
+        if [[ -n "$BRIDGE_MODE" ]]; then
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: ${BRIDGE_MODE} (from env)"
+        else
+            local bridge_options=("internal" "external" "both")
+            local bridge_header="Configure network bridges for VMs and containers"$'\n'
+            bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
+            bridge_header+="vmbr1 = internal (NAT with private subnet)"
 
-        interactive_menu \
-            "Network Bridge Mode (↑/↓ select, Enter confirm)" \
-            "$bridge_header" \
-            "Internal only (NAT)|VMs use private IPs with NAT to internet" \
-            "External only (Bridged)|VMs get IPs from your router/DHCP" \
-            "Both bridges|Internal NAT + External bridged network"
+            interactive_menu \
+                "Network Bridge Mode (↑/↓ select, Enter confirm)" \
+                "$bridge_header" \
+                "Internal only (NAT)|VMs use private IPs with NAT to internet" \
+                "External only (Bridged)|VMs get IPs from your router/DHCP" \
+                "Both bridges|Internal NAT + External bridged network"
 
-        BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
-        case "$BRIDGE_MODE" in
-            internal)
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Internal NAT only (vmbr0)"
-                ;;
-            external)
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: External bridged only (vmbr0)"
-                ;;
-            both)
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Both (vmbr0=external, vmbr1=internal)"
-                ;;
-        esac
+            BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
+            case "$BRIDGE_MODE" in
+                internal)
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Internal NAT only (vmbr0)"
+                    ;;
+                external)
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: External bridged only (vmbr0)"
+                    ;;
+                both)
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Both (vmbr0=external, vmbr1=internal)"
+                    ;;
+            esac
+        fi
 
         # --- Private subnet selection menu (only if internal bridge is used) ---
         if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
-            local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
-            local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
-
-            interactive_menu \
-                "Private Subnet (↑/↓ select, Enter confirm)" \
-                "Internal network for VMs and containers" \
-                "10.0.0.0/24|Class A private (recommended)" \
-                "192.168.1.0/24|Class C private (common home network)" \
-                "172.16.0.0/24|Class B private" \
-                "Custom|Enter subnet manually"
-
-            if [[ $MENU_SELECTED -eq 3 ]]; then
-                # Custom subnet - prompt for manual entry
-                local subnet_prompt="Enter your private subnet: "
-                while true; do
-                    read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
-                    if validate_subnet "$PRIVATE_SUBNET"; then
-                        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
-                        break
-                    fi
-                    echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-                done
+            if [[ -n "$PRIVATE_SUBNET" ]]; then
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET} (from env)"
             else
-                PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+                local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
+
+                interactive_menu \
+                    "Private Subnet (↑/↓ select, Enter confirm)" \
+                    "Internal network for VMs and containers" \
+                    "10.0.0.0/24|Class A private (recommended)" \
+                    "192.168.1.0/24|Class C private (common home network)" \
+                    "172.16.0.0/24|Class B private" \
+                    "Custom|Enter subnet manually"
+
+                if [[ $MENU_SELECTED -eq 3 ]]; then
+                    # Custom subnet - prompt for manual entry
+                    local subnet_prompt="Enter your private subnet: "
+                    while true; do
+                        read -e -p "$subnet_prompt" -i "10.0.0.0/24" PRIVATE_SUBNET
+                        if validate_subnet "$PRIVATE_SUBNET"; then
+                            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
+                            break
+                        fi
+                        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+                    done
+                else
+                    PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+                fi
             fi
         fi
 
         # --- ZFS RAID mode selection menu (only if 2+ drives detected) ---
         if [ "${NVME_COUNT:-0}" -ge 2 ]; then
-            local zfs_options=("raid1" "raid0" "single")
-            local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
+            if [[ -n "$ZFS_RAID" ]]; then
+                echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${ZFS_RAID} (from env)"
+            else
+                local zfs_options=("raid1" "raid0" "single")
+                local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
 
-            interactive_menu \
-                "ZFS Storage Mode (↑/↓ select, Enter confirm)" \
-                "" \
-                "${zfs_labels[0]}|Survives 1 disk failure" \
-                "${zfs_labels[1]}|2x space & speed, data loss if any disk fails" \
-                "${zfs_labels[2]}|Uses first drive only, ignores other drives"
+                interactive_menu \
+                    "ZFS Storage Mode (↑/↓ select, Enter confirm)" \
+                    "" \
+                    "${zfs_labels[0]}|Survives 1 disk failure" \
+                    "${zfs_labels[1]}|2x space & speed, data loss if any disk fails" \
+                    "${zfs_labels[2]}|Uses first drive only, ignores other drives"
 
-            ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
+                ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
+            fi
         fi
 
         # --- SSH Public Key selection menu ---
-        # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
-        local DETECTED_SSH_KEY=""
-        if [[ -f /root/.ssh/authorized_keys ]]; then
-            DETECTED_SSH_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-        fi
-
-        if [[ -n "$DETECTED_SSH_KEY" ]]; then
-            # Key detected - show interactive selector
-            parse_ssh_key "$DETECTED_SSH_KEY"
-
-            # Build header with key info
-            local ssh_header="! Password authentication will be DISABLED"$'\n'
-            ssh_header+="Detected key from Rescue System:"$'\n'
-            ssh_header+="  Type:    ${SSH_KEY_TYPE}"$'\n'
-            ssh_header+="  Key:     ${SSH_KEY_SHORT}"
-            if [[ -n "$SSH_KEY_COMMENT" ]]; then
-                ssh_header+=$'\n'"  Comment: ${SSH_KEY_COMMENT}"
-            fi
-
-            interactive_menu \
-                "SSH Public Key (↑/↓ select, Enter confirm)" \
-                "$ssh_header" \
-                "Use detected key|Recommended - already configured in Hetzner" \
-                "Enter different key|Paste your own SSH public key"
-
-            if [[ $MENU_SELECTED -eq 0 ]]; then
-                SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
-            else
-                # User wants to enter a different key
-                SSH_PUBLIC_KEY=""
-            fi
-        fi
-
-        # If no key yet (either not detected or user chose to enter manually)
-        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            # Show input box for manual entry
-            local ssh_input_content="! Password authentication will be DISABLED"$'\n'
-            if [[ -z "$DETECTED_SSH_KEY" ]]; then
-                ssh_input_content+=$'\n'"No SSH key detected in Rescue System."
-            fi
-            ssh_input_content+=$'\n'$'\n'"Paste your SSH public key below:"$'\n'
-            ssh_input_content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
-
-            local input_box_lines
-            input_box_lines=$({
-                echo "SSH Public Key Configuration"
-                echo "$ssh_input_content"
-            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
-
-            {
-                echo "SSH Public Key Configuration"
-                echo "$ssh_input_content"
-            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
-
-            # Prompt for key
-            local ssh_prompt="SSH Public Key: "
-            while true; do
-                read -e -p "$ssh_prompt" SSH_PUBLIC_KEY
-                if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-                    if validate_ssh_key "$SSH_PUBLIC_KEY"; then
-                        break
-                    else
-                        echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continue anyway? (y/n): ${CLR_RESET}"
-                        read -rsn1 confirm
-                        echo ""
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            break
-                        fi
-                    fi
-                else
-                    echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
-                fi
-            done
-
-            # Clear the input box and show confirmation (move up and clear)
-            tput cuu $((input_box_lines + 3))
-            for ((i=0; i<input_box_lines+3; i++)); do
-                printf "\033[2K\n"
-            done
-            tput cuu $((input_box_lines + 3))
-
+        if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            # SSH key already set via env - skip selection
             parse_ssh_key "$SSH_PUBLIC_KEY"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key: ${SSH_KEY_TYPE} (from env)"
+        else
+            # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
+            local DETECTED_SSH_KEY=""
+            if [[ -f /root/.ssh/authorized_keys ]]; then
+                DETECTED_SSH_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+            fi
+
+            if [[ -n "$DETECTED_SSH_KEY" ]]; then
+                # Key detected - show interactive selector
+                parse_ssh_key "$DETECTED_SSH_KEY"
+
+                # Build header with key info
+                local ssh_header="! Password authentication will be DISABLED"$'\n'
+                ssh_header+="Detected key from Rescue System:"$'\n'
+                ssh_header+="  Type:    ${SSH_KEY_TYPE}"$'\n'
+                ssh_header+="  Key:     ${SSH_KEY_SHORT}"
+                if [[ -n "$SSH_KEY_COMMENT" ]]; then
+                    ssh_header+=$'\n'"  Comment: ${SSH_KEY_COMMENT}"
+                fi
+
+                interactive_menu \
+                    "SSH Public Key (↑/↓ select, Enter confirm)" \
+                    "$ssh_header" \
+                    "Use detected key|Recommended - already configured in Hetzner" \
+                    "Enter different key|Paste your own SSH public key"
+
+                if [[ $MENU_SELECTED -eq 0 ]]; then
+                    SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
+                else
+                    # User wants to enter a different key
+                    SSH_PUBLIC_KEY=""
+                fi
+            fi
+
+            # If no key yet (either not detected or user chose to enter manually)
+            if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+                # Show input box for manual entry
+                local ssh_input_content="! Password authentication will be DISABLED"$'\n'
+                if [[ -z "$DETECTED_SSH_KEY" ]]; then
+                    ssh_input_content+=$'\n'"No SSH key detected in Rescue System."
+                fi
+                ssh_input_content+=$'\n'$'\n'"Paste your SSH public key below:"$'\n'
+                ssh_input_content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
+
+                local input_box_lines
+                input_box_lines=$({
+                    echo "SSH Public Key Configuration"
+                    echo "$ssh_input_content"
+                } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
+
+                {
+                    echo "SSH Public Key Configuration"
+                    echo "$ssh_input_content"
+                } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
+
+                # Prompt for key
+                local ssh_prompt="SSH Public Key: "
+                while true; do
+                    read -e -p "$ssh_prompt" SSH_PUBLIC_KEY
+                    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+                        if validate_ssh_key "$SSH_PUBLIC_KEY"; then
+                            break
+                        else
+                            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continue anyway? (y/n): ${CLR_RESET}"
+                            read -rsn1 confirm
+                            echo ""
+                            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                                break
+                            fi
+                        fi
+                    else
+                        echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+                    fi
+                done
+
+                # Clear the input box and show confirmation (move up and clear)
+                tput cuu $((input_box_lines + 3))
+                for ((i=0; i<input_box_lines+3; i++)); do
+                    printf "\033[2K\n"
+                done
+                tput cuu $((input_box_lines + 3))
+
+                parse_ssh_key "$SSH_PUBLIC_KEY"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
+            fi
         fi
 
         # --- Tailscale VPN selection menu ---
-        local ts_header="Tailscale provides secure remote access to your server."$'\n'
-        ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
-
-        interactive_menu \
-            "Tailscale VPN - Optional (↑/↓ select, Enter confirm)" \
-            "$ts_header" \
-            "Install Tailscale|Recommended for secure remote access" \
-            "Skip installation|Install Tailscale later if needed"
-
-        if [[ $MENU_SELECTED -eq 0 ]]; then
-            INSTALL_TAILSCALE="yes"
-            TAILSCALE_SSH="yes"
-            TAILSCALE_WEBUI="yes"
-
-            # Show auth key input box
-            local auth_content="Auth key enables automatic configuration."$'\n'
-            auth_content+="Leave empty for manual auth after reboot."$'\n'
-            auth_content+=$'\n'
-            auth_content+="For unattended setup, use a reusable auth key"$'\n'
-            auth_content+="with tags and expiry for better security."
-
-            local auth_box_lines
-            auth_box_lines=$({
-                echo "Tailscale Auth Key (optional)"
-                echo "$auth_content"
-            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
-
-            {
-                echo "Tailscale Auth Key (optional)"
-                echo "$auth_content"
-            } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
-
-            # Prompt for auth key
-            read -e -p "Auth Key: " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
-
-            # Clear the input box (move up and clear)
-            tput cuu $((auth_box_lines + 2))
-            for ((i=0; i<auth_box_lines+2; i++)); do
-                printf "\033[2K\n"
-            done
-            tput cuu $((auth_box_lines + 2))
-
-            # Show confirmation
-            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (auto-connect)"
+        if [[ -n "$INSTALL_TAILSCALE" ]]; then
+            # Tailscale already configured via env
+            if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+                TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+                TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+                if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: yes (auto-connect, from env)"
+                else
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: yes (manual auth, from env)"
+                fi
             else
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (manual auth required)"
+                TAILSCALE_AUTH_KEY=""
+                TAILSCALE_SSH="no"
+                TAILSCALE_WEBUI="no"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: skipped (from env)"
             fi
         else
-            INSTALL_TAILSCALE="no"
-            TAILSCALE_AUTH_KEY=""
-            TAILSCALE_SSH="no"
-            TAILSCALE_WEBUI="no"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
+            local ts_header="Tailscale provides secure remote access to your server."$'\n'
+            ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
+
+            interactive_menu \
+                "Tailscale VPN - Optional (↑/↓ select, Enter confirm)" \
+                "$ts_header" \
+                "Install Tailscale|Recommended for secure remote access" \
+                "Skip installation|Install Tailscale later if needed"
+
+            if [[ $MENU_SELECTED -eq 0 ]]; then
+                INSTALL_TAILSCALE="yes"
+                TAILSCALE_SSH="yes"
+                TAILSCALE_WEBUI="yes"
+
+                # Show auth key input box (skip if TAILSCALE_AUTH_KEY already set)
+                if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
+                    local auth_content="Auth key enables automatic configuration."$'\n'
+                    auth_content+="Leave empty for manual auth after reboot."$'\n'
+                    auth_content+=$'\n'
+                    auth_content+="For unattended setup, use a reusable auth key"$'\n'
+                    auth_content+="with tags and expiry for better security."
+
+                    local auth_box_lines
+                    auth_box_lines=$({
+                        echo "Tailscale Auth Key (optional)"
+                        echo "$auth_content"
+                    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
+
+                    {
+                        echo "Tailscale Auth Key (optional)"
+                        echo "$auth_content"
+                    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
+
+                    # Prompt for auth key
+                    read -e -p "Auth Key: " TAILSCALE_AUTH_KEY
+
+                    # Clear the input box (move up and clear)
+                    tput cuu $((auth_box_lines + 2))
+                    for ((i=0; i<auth_box_lines+2; i++)); do
+                        printf "\033[2K\n"
+                    done
+                    tput cuu $((auth_box_lines + 2))
+                fi
+
+                # Show confirmation
+                if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (auto-connect)"
+                else
+                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (manual auth required)"
+                fi
+            else
+                INSTALL_TAILSCALE="no"
+                TAILSCALE_AUTH_KEY=""
+                TAILSCALE_SSH="no"
+                TAILSCALE_WEBUI="no"
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
+            fi
         fi
     fi
 
