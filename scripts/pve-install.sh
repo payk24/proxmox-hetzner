@@ -789,6 +789,13 @@ REPOEOF
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get dist-upgrade -yqq
+        apt-get autoremove -yqq
+        apt-get clean
+
+        # Proxmox-specific updates
+        pveupgrade 2>/dev/null || true
+        pveam update 2>/dev/null || true
+
         echo "System packages updated"
 UPDATEEOF
 
