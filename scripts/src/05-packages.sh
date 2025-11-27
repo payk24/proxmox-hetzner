@@ -112,14 +112,19 @@ download_proxmox_iso() {
 make_answer_toml() {
     echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
 
-    # Build disk_list based on detected drives (using vda/vdb for QEMU virtio)
-    if [ "$RAID_MODE" = "raid1" ]; then
-        DISK_LIST='["/dev/vda", "/dev/vdb"]'
-        ZFS_RAID="raid1"
-    else
-        DISK_LIST='["/dev/vda"]'
-        ZFS_RAID="single"
-    fi
+    # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
+    case "$ZFS_RAID" in
+        single)
+            DISK_LIST='["/dev/vda"]'
+            ;;
+        raid0|raid1)
+            DISK_LIST='["/dev/vda", "/dev/vdb"]'
+            ;;
+        *)
+            # Default to raid1 for 2 drives
+            DISK_LIST='["/dev/vda", "/dev/vdb"]'
+            ;;
+    esac
 
     cat <<EOF > answer.toml
 [global]

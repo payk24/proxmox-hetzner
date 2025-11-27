@@ -130,8 +130,8 @@ TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY}"
 TAILSCALE_SSH="${TAILSCALE_SSH}"
 TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
 
-# RAID mode (auto-detected, but can be overridden)
-# RAID_MODE="${RAID_MODE}"
+# ZFS RAID mode (single, raid0, raid1)
+ZFS_RAID="${ZFS_RAID}"
 EOF
     chmod 600 "$file"
     echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"
