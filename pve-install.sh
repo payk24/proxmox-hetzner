@@ -540,22 +540,22 @@ show_system_status() {
     echo -e "${CLR_BLUE}┌─────────────────────────────────────────────────────┐${CLR_RESET}"
     echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}System Information${CLR_RESET}                                 ${CLR_BLUE}│${CLR_RESET}"
     echo -e "${CLR_BLUE}├───────────────────┬─────────────────────────────────┤${CLR_RESET}"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
-    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-33s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
     echo -e "${CLR_BLUE}├───────────────────┴─────────────────────────────────┤${CLR_RESET}"
     echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}Storage${CLR_RESET}                                            ${CLR_BLUE}│${CLR_RESET}"
     echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
 
     if [ $nvme_error -eq 1 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-51s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-53s${CLR_RESET}${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-30s${CLR_BLUE}│${CLR_RESET}\n" \
-                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:30}"
+            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-10s %5s  %-31s${CLR_BLUE}│${CLR_RESET}\n" \
+                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:31}"
         done
     fi
 
@@ -660,7 +660,10 @@ get_system_inputs() {
     # Prompt user for interface name
     if [[ "$NON_INTERACTIVE" != true ]]; then
         echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
-        read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
+        local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
+        read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
+        # Show checkmark on same line
+        printf "\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\n"
     fi
 
     # Get network information from the CURRENT interface (the one active in Rescue)
@@ -700,40 +703,45 @@ get_system_inputs() {
         EMAIL="${EMAIL:-admin@example.com}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
     else
+        local hostname_prompt="Enter your hostname (e.g., pve, proxmox): "
         while true; do
-            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
+            read -e -p "$hostname_prompt" -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
             if validate_hostname "$PVE_HOSTNAME"; then
-                echo -e "${CLR_GREEN}✓ Hostname: ${PVE_HOSTNAME}${CLR_RESET}"
+                printf "\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
         done
 
-        read -e -p "Enter domain suffix: " -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
-        echo -e "${CLR_GREEN}✓ Domain suffix: ${DOMAIN_SUFFIX}${CLR_RESET}"
+        local domain_prompt="Enter domain suffix: "
+        read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
+        printf "\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\n"
 
+        local tz_prompt="Enter your timezone: "
         while true; do
-            read -e -p "Enter your timezone: " -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
+            read -e -p "$tz_prompt" -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
             if validate_timezone "$TIMEZONE"; then
-                echo -e "${CLR_GREEN}✓ Timezone: ${TIMEZONE}${CLR_RESET}"
+                printf "\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
         done
 
+        local email_prompt="Enter your email address: "
         while true; do
-            read -e -p "Enter your email address: " -i "${EMAIL:-admin@example.com}" EMAIL
+            read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
             if validate_email "$EMAIL"; then
-                echo -e "${CLR_GREEN}✓ Email: ${EMAIL}${CLR_RESET}"
+                printf "\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
         done
 
+        local subnet_prompt="Enter your private subnet: "
         while true; do
-            read -e -p "Enter your private subnet: " -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
+            read -e -p "$subnet_prompt" -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
             if validate_subnet "$PRIVATE_SUBNET"; then
-                echo -e "${CLR_GREEN}✓ Private subnet: ${PRIVATE_SUBNET}${CLR_RESET}"
+                printf "\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\n"
                 break
             fi
             echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
@@ -741,7 +749,6 @@ get_system_inputs() {
     fi
 
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
-    echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
@@ -1225,6 +1232,16 @@ REPOEOF
             done
         }
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
+    '
+
+    # Configure UTF-8 locales for proper Cyrillic/international character support
+    remote_exec_with_progress "Configuring UTF-8 locales" '
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq locales
+        sed -i "s/# en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
+        sed -i "s/# ru_RU.UTF-8/ru_RU.UTF-8/" /etc/locale.gen
+        locale-gen
+        update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
     '
 
     # Configure nf_conntrack

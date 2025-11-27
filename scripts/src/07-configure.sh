@@ -128,6 +128,16 @@ REPOEOF
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
+    # Configure UTF-8 locales for proper Cyrillic/international character support
+    remote_exec_with_progress "Configuring UTF-8 locales" '
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq locales
+        sed -i "s/# en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
+        sed -i "s/# ru_RU.UTF-8/ru_RU.UTF-8/" /etc/locale.gen
+        locale-gen
+        update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+    '
+
     # Configure nf_conntrack
     echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
     remote_exec_script << 'CONNTRACKEOF'
