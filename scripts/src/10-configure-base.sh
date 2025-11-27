@@ -232,17 +232,28 @@ ZSHRC
         fi
     '
 
-    # Remove Proxmox subscription notice
-    print_info "Removing Proxmox subscription notice..."
-    remote_exec_script << 'SUBEOF'
-        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-            systemctl restart pveproxy.service
-            echo "Subscription notice removed"
-        else
-            echo "proxmoxlib.js not found, skipping"
-        fi
-SUBEOF
+    # Remove Proxmox subscription notice (use heredoc to avoid quote escaping issues)
+    {
+        remote_exec_script << 'SUBNOTICE'
+            JS_FILE="/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js"
+            if [ -f "$JS_FILE" ]; then
+                # Backup original
+                cp "$JS_FILE" "${JS_FILE}.bak"
+
+                # Proxmox 8.x: patch the checked_command function to skip subscription check
+                # This replaces "Ext.Msg.show({" with "void({ //" only for subscription dialog
+                sed -Ezi "s/(Ext\.Msg\.show\(\{\s+title:\s+gettext\('No valid subscription')/void({ \/\/ \1/g" "$JS_FILE"
+
+                # Verify file is not corrupted (should still have content)
+                if [ ! -s "$JS_FILE" ] || ! grep -q "Ext.define" "$JS_FILE"; then
+                    cp "${JS_FILE}.bak" "$JS_FILE"
+                fi
+
+                systemctl restart pveproxy.service 2>/dev/null || true
+            fi
+SUBNOTICE
+    } > /dev/null 2>&1 &
+    show_progress $! "Removing Proxmox subscription notice"
 
     print_success "Base system configuration complete"
 }
