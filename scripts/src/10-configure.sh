@@ -20,7 +20,7 @@ make_template_files() {
     download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
 
     # NTP configuration
-    download_file "./template_files/chrony.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony.conf"
+    download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
 
     # MOTD configuration
     download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
@@ -176,7 +176,7 @@ DEFLOCEOF
         apt-get install -yqq chrony
         systemctl stop chrony
     '
-    remote_copy "template_files/chrony.conf" "/etc/chrony/chrony.conf"
+    remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
     remote_exec "systemctl enable chrony && systemctl start chrony"
 
     # Configure dynamic MOTD
