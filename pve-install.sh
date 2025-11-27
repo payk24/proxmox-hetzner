@@ -526,7 +526,7 @@ detect_nvme_drives() {
     for drive in "${NVME_DRIVES[@]}"; do
         local size=$(lsblk -d -n -o SIZE "$drive" | xargs)
         local model=$(lsblk -d -n -o MODEL "$drive" 2>/dev/null | xargs || echo "NVMe")
-        printf "${CLR_BLUE}│${CLR_RESET}  %-8s  %6s  %-18s ${CLR_BLUE}│${CLR_RESET}\n" "$(basename $drive)" "$size" "$model"
+        printf "${CLR_BLUE}│${CLR_RESET}  %-8s  %5s  %-22.22s${CLR_BLUE}│${CLR_RESET}\n" "$(basename $drive)" "$size" "$model"
     done
 
     echo -e "${CLR_BLUE}├─────────────────────────────────────────┤${CLR_RESET}"
