@@ -10,12 +10,15 @@ make_template_files() {
 
     download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
     download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
-    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/interfaces"
     download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
     download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
 
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
+
+    # Download interfaces template based on bridge mode
+    local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
+    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
     # Process hosts file
     echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
@@ -25,7 +28,7 @@ make_template_files() {
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
-    echo -e "${CLR_YELLOW}Processing interfaces file...${CLR_RESET}"
+    echo -e "${CLR_YELLOW}Processing interfaces file (mode: ${BRIDGE_MODE:-internal})...${CLR_RESET}"
     sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces

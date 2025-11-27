@@ -16,6 +16,9 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 
 ### Features
 
+- **Interactive menus** for easy configuration (arrow keys navigation)
+- **Network bridge modes**: Internal NAT, External bridged, or both
+- **ZFS RAID selection**: RAID-1 (mirror), RAID-0 (stripe), or single drive
 - Clean progress indicators with spinners for all operations
 - Full logging to file for troubleshooting
 - Pre-flight hardware and connectivity checks
@@ -96,11 +99,21 @@ bash pve-install.sh -c proxmox.conf -n
 The script will:
 - Download the latest Proxmox VE ISO
 - Create an auto-installation configuration
-- Install Proxmox VE with RAID-1 ZFS configuration
-- Configure networking for both IPv4 and IPv6
+- Install Proxmox VE with your chosen ZFS configuration
+- Configure networking based on your bridge mode selection
 - Set up proper hostname and FQDN
 - Apply recommended system settings
 - **Optional:** Install Tailscale VPN with SSH and Web UI access
+
+### Network Bridge Modes
+
+| Mode | Description | Configuration |
+|------|-------------|---------------|
+| **Internal only** | NAT network - VMs get private IPs | `vmbr0` = NAT bridge (10.0.0.0/24 default) |
+| **External only** | Bridged to physical NIC - VMs get IPs from router/DHCP | `vmbr0` = bridged to NIC |
+| **Both** | Both internal and external networks | `vmbr0` = external, `vmbr1` = NAT |
+
+> **Tip:** Use "Internal only" for isolated VMs with NAT, "External only" if you have additional IPs from Hetzner, or "Both" for maximum flexibility.
 
 ### 3. Automatic Post-Installation Optimizations
 
