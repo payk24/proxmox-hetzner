@@ -740,6 +740,32 @@ TAILSCALESERVEEOF
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
+    # Configure UEFI boot order to prioritize disk over PXE
+    # This is critical for Hetzner servers where PXE is often first in boot order
+    echo -e "${CLR_YELLOW}Configuring UEFI boot order...${CLR_RESET}"
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'EFIEOF'
+        if command -v efibootmgr &> /dev/null; then
+            # Get all boot entries for disks (UEFI OS entries, not PXE or Shell)
+            DISK_ENTRIES=$(efibootmgr | grep -E "UEFI OS|proxmox|debian|linux" -i | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
+            # Get PXE and other entries
+            OTHER_ENTRIES=$(efibootmgr | grep -E "PXE|Shell|Network" -i | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
+
+            if [ -n "$DISK_ENTRIES" ]; then
+                # Build new boot order: disks first, then others
+                if [ -n "$OTHER_ENTRIES" ]; then
+                    NEW_ORDER="${DISK_ENTRIES},${OTHER_ENTRIES}"
+                else
+                    NEW_ORDER="${DISK_ENTRIES}"
+                fi
+                efibootmgr -o "$NEW_ORDER" 2>/dev/null && echo "UEFI boot order configured: disk first, PXE second" || echo "Warning: Could not set boot order"
+            else
+                echo "Warning: No disk boot entries found, boot order unchanged"
+            fi
+        else
+            echo "efibootmgr not available, skipping boot order configuration"
+        fi
+EFIEOF
+
     # Power off the VM BEFORE restarting sshd (while password auth still works)
     # This ensures we can connect and poweroff the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
@@ -763,6 +789,7 @@ reboot_to_main_os() {
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo "  ✓ Subscription notice removed"
+    echo "  ✓ UEFI boot order: disk first, PXE second"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
