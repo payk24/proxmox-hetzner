@@ -461,39 +461,140 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
         fi
     else
-        echo ""
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
-        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-        echo "Tailscale provides secure remote access to your Proxmox server."
-        echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
-        echo ""
-        read -e -p "Install Tailscale? (y/n): " -i "${INSTALL_TAILSCALE:-y}" INSTALL_TAILSCALE
+        # Interactive Tailscale configuration
+        local options=("yes" "no")
+        local labels=("Install Tailscale" "Skip installation")
+        local descriptions=("Recommended for secure remote access" "Install Tailscale later if needed")
+        local selected=0
+        local key=""
+        local box_lines=0
 
-        if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
-            INSTALL_TAILSCALE="yes"
-            echo ""
-            echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
-            echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
-            echo ""
-            read -e -p "Tailscale Auth Key (leave empty for manual auth): " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+        # Hide cursor
+        tput civis
 
-            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                echo -e "${CLR_GREEN}✓ Auth key provided. Tailscale will be configured automatically${CLR_RESET}"
-            else
-                echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+        # Function to draw the Tailscale selection box
+        draw_tailscale_menu() {
+            local content=""
+            content+="Tailscale provides secure remote access to your server."$'\n'
+            content+="Auth key: https://login.tailscale.com/admin/settings/keys"$'\n'
+            content+=""$'\n'
+            for i in "${!options[@]}"; do
+                if [ $i -eq $selected ]; then
+                    content+="[*]|${labels[$i]}"$'\n'
+                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                else
+                    content+="[ ]|${labels[$i]}"$'\n'
+                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                fi
+            done
+            # Remove trailing newline
+            content="${content%$'\n'}"
+
+            {
+                echo "Tailscale VPN - Optional (^/v select, Enter confirm)"
+                echo "$content" | column -t -s '|'
+            } | boxes -d stone -p a1
+        }
+
+        # Count lines in the box for clearing later
+        box_lines=$(draw_tailscale_menu | wc -l)
+
+        # Save cursor position
+        tput sc
+
+        while true; do
+            # Move cursor to saved position
+            tput rc
+
+            # Draw the menu with colors
+            draw_tailscale_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[*]\033[m/g' \
+                                      -e $'s/\\[ \\]/\033[1;34m[ ]\033[m/g'
+
+            # Read a single keypress
+            IFS= read -rsn1 key
+
+            # Check for escape sequence (arrow keys)
+            if [[ "$key" == $'\x1b' ]]; then
+                read -rsn2 -t 0.1 key || true
+                case "$key" in
+                    '[A') # Up arrow
+                        ((selected--)) || true
+                        [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
+                        ;;
+                    '[B') # Down arrow
+                        ((selected++)) || true
+                        [ $selected -ge ${#options[@]} ] && selected=0
+                        ;;
+                esac
+            elif [[ "$key" == "" ]]; then
+                # Enter pressed - confirm selection
+                break
+            elif [[ "$key" == "1" ]]; then
+                selected=0; break
+            elif [[ "$key" == "2" ]]; then
+                selected=1; break
             fi
+        done
 
+        # Show cursor again
+        tput cnorm
+
+        # Clear the selection box
+        tput rc
+        for ((i=0; i<box_lines; i++)); do
+            printf "\033[K\n"
+        done
+        tput rc
+
+        if [[ "${options[$selected]}" == "yes" ]]; then
+            INSTALL_TAILSCALE="yes"
             TAILSCALE_SSH="yes"
             TAILSCALE_WEBUI="yes"
-            echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
-            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
+
+            # Show auth key input box
+            local auth_box_lines=0
+
+            draw_auth_key_box() {
+                local content=""
+                content+="Auth key enables automatic configuration."$'\n'
+                content+="Leave empty for manual auth after reboot."$'\n'
+                content+=""$'\n'
+                content+="For unattended setup, use a reusable auth key"$'\n'
+                content+="with tags and expiry for better security."
+
+                {
+                    echo "Tailscale Auth Key (optional)"
+                    echo "$content"
+                } | boxes -d stone -p a1
+            }
+
+            # Display the auth key input box
+            auth_box_lines=$(draw_auth_key_box | wc -l)
+            tput sc
+            draw_auth_key_box
+
+            # Prompt for auth key
+            read -e -p "Auth Key: " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+
+            # Clear the input box
+            tput rc
+            for ((i=0; i<auth_box_lines+2; i++)); do
+                printf "\033[K\n"
+            done
+            tput rc
+
+            # Show confirmation
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (auto-connect)"
+            else
+                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (manual auth required)"
+            fi
         else
             INSTALL_TAILSCALE="no"
             TAILSCALE_AUTH_KEY=""
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
-            echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
         fi
     fi
 
