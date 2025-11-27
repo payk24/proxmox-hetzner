@@ -19,7 +19,7 @@ make_template_files() {
         download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
         download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
-        download_file "./template_files/pve-remove-nag.sh" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag.sh"
+        download_file "./template_files/pve-remove-nag" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag"
         download_file "./template_files/99-pve-nag-removal" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-pve-nag-removal"
     ) > /dev/null 2>&1 &
     show_progress $! "Downloading template files"
@@ -211,10 +211,10 @@ ENVEOF
     # Remove Proxmox subscription notice (Web + Mobile UI) with persistent DPkg hook
     (
         remote_exec "mkdir -p /usr/local/bin"
-        remote_copy "template_files/pve-remove-nag.sh" "/usr/local/bin/pve-remove-nag.sh"
+        remote_copy "template_files/pve-remove-nag" "/usr/local/bin/pve-remove-nag"
         remote_copy "template_files/99-pve-nag-removal" "/etc/apt/apt.conf.d/99-pve-nag-removal"
-        remote_exec "chmod 755 /usr/local/bin/pve-remove-nag.sh"
-        remote_exec "/usr/local/bin/pve-remove-nag.sh"
+        remote_exec "chmod 755 /usr/local/bin/pve-remove-nag"
+        remote_exec "/usr/local/bin/pve-remove-nag"
         remote_exec "systemctl restart pveproxy.service 2>/dev/null || true"
     ) > /dev/null 2>&1 &
     show_progress $! "Removing subscription notice" "Subscription notice removed (persistent)"
