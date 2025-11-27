@@ -190,23 +190,23 @@ get_system_inputs() {
                 # Move cursor to saved position
                 tput rc
 
-                # Draw the menu with colors
-                draw_zfs_menu | sed -e "s/\[\*\]/${CLR_GREEN}[●]${CLR_RESET}/g" \
-                                    -e "s/\[ \]/${CLR_BLUE}[○]${CLR_RESET}/g"
+                # Draw the menu with colors (use $'...' for literal escape codes to avoid sed backreference issues)
+                draw_zfs_menu | sed -e $'s/\\[\\*\\]/\033[1;32m[●]\033[m/g' \
+                                    -e $'s/\\[ \\]/\033[1;34m[○]\033[m/g'
 
                 # Read a single keypress
                 IFS= read -rsn1 key
 
                 # Check for escape sequence (arrow keys)
                 if [[ "$key" == $'\x1b' ]]; then
-                    read -rsn2 -t 0.1 key
+                    read -rsn2 -t 0.1 key || true  # ignore timeout exit code with set -e
                     case "$key" in
                         '[A') # Up arrow
-                            ((selected--))
+                            ((selected--)) || true  # prevent exit when result is 0
                             [ $selected -lt 0 ] && selected=$((${#options[@]} - 1))
                             ;;
                         '[B') # Down arrow
-                            ((selected++))
+                            ((selected++)) || true  # prevent exit when result is 0
                             [ $selected -ge ${#options[@]} ] && selected=0
                             ;;
                     esac
