@@ -75,10 +75,9 @@ reboot_to_main_os() {
 # Main execution flow
 # =============================================================================
 
-# Run pre-flight checks first
-preflight_checks
-
-detect_nvme_drives
+# Collect system info and display status
+collect_system_info
+show_system_status
 get_system_inputs
 prepare_packages
 download_proxmox_iso

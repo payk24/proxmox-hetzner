@@ -1,102 +1,74 @@
 # =============================================================================
-# Pre-flight checks
+# System info collection
 # =============================================================================
 
-preflight_checks() {
-    echo -e "${CLR_BLUE}Running pre-flight checks...${CLR_RESET}"
-    echo ""
+collect_system_info() {
     local errors=0
 
-    # Gather system information
-    local root_status="" root_color=""
-    local net_status="" net_color=""
-    local disk_status="" disk_color=""
-    local ram_status="" ram_color=""
-    local cpu_status="" cpu_color=""
-    local kvm_status="" kvm_color=""
-
+    # Store results in global variables for combined table display
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
-        root_status="✗ Not root"
-        root_color="${CLR_RED}"
+        PREFLIGHT_ROOT="✗ Not root"
+        PREFLIGHT_ROOT_CLR="${CLR_RED}"
         errors=$((errors + 1))
     else
-        root_status="✓ Running as root"
-        root_color="${CLR_GREEN}"
+        PREFLIGHT_ROOT="✓ Running as root"
+        PREFLIGHT_ROOT_CLR="${CLR_GREEN}"
     fi
 
     # Check internet connectivity
     if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
-        net_status="✓ Available"
-        net_color="${CLR_GREEN}"
+        PREFLIGHT_NET="✓ Available"
+        PREFLIGHT_NET_CLR="${CLR_GREEN}"
     else
-        net_status="✗ No connection"
-        net_color="${CLR_RED}"
+        PREFLIGHT_NET="✗ No connection"
+        PREFLIGHT_NET_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check available disk space (need at least 5GB in /root)
     local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
     if [[ $free_space_mb -ge 5000 ]]; then
-        disk_status="✓ ${free_space_mb} MB"
-        disk_color="${CLR_GREEN}"
+        PREFLIGHT_DISK="✓ ${free_space_mb} MB"
+        PREFLIGHT_DISK_CLR="${CLR_GREEN}"
     else
-        disk_status="✗ ${free_space_mb} MB (need 5GB+)"
-        disk_color="${CLR_RED}"
+        PREFLIGHT_DISK="✗ ${free_space_mb} MB (need 5GB+)"
+        PREFLIGHT_DISK_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check RAM (need at least 4GB)
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     if [[ $total_ram_mb -ge 4000 ]]; then
-        ram_status="✓ ${total_ram_mb} MB"
-        ram_color="${CLR_GREEN}"
+        PREFLIGHT_RAM="✓ ${total_ram_mb} MB"
+        PREFLIGHT_RAM_CLR="${CLR_GREEN}"
     else
-        ram_status="✗ ${total_ram_mb} MB (need 4GB+)"
-        ram_color="${CLR_RED}"
+        PREFLIGHT_RAM="✗ ${total_ram_mb} MB (need 4GB+)"
+        PREFLIGHT_RAM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check CPU cores
     local cpu_cores=$(nproc)
     if [[ $cpu_cores -ge 2 ]]; then
-        cpu_status="✓ ${cpu_cores} cores"
-        cpu_color="${CLR_GREEN}"
+        PREFLIGHT_CPU="✓ ${cpu_cores} cores"
+        PREFLIGHT_CPU_CLR="${CLR_GREEN}"
     else
-        cpu_status="⚠ ${cpu_cores} core(s)"
-        cpu_color="${CLR_YELLOW}"
+        PREFLIGHT_CPU="⚠ ${cpu_cores} core(s)"
+        PREFLIGHT_CPU_CLR="${CLR_YELLOW}"
     fi
 
     # Check if KVM is available
     if [[ -e /dev/kvm ]]; then
-        kvm_status="✓ Available"
-        kvm_color="${CLR_GREEN}"
+        PREFLIGHT_KVM="✓ Available"
+        PREFLIGHT_KVM_CLR="${CLR_GREEN}"
     else
-        kvm_status="✗ Not available"
-        kvm_color="${CLR_RED}"
+        PREFLIGHT_KVM="✗ Not available"
+        PREFLIGHT_KVM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
-    # Print table
-    echo -e "┌───────────────────┬────────────────────────────┐"
-    echo -e "│ ${CLR_CYAN}Check${CLR_RESET}             │ ${CLR_CYAN}Status${CLR_RESET}                     │"
-    echo -e "├───────────────────┼────────────────────────────┤"
-    printf "│ %-17s │ ${root_color}%-19s${CLR_RESET}        │\n" "Root Access" "$root_status"
-    printf "│ %-17s │ ${net_color}%-19s${CLR_RESET}        │\n" "Internet" "$net_status"
-    printf "│ %-17s │ ${disk_color}%-19s${CLR_RESET}        │\n" "Disk Space" "$disk_status"
-    printf "│ %-17s │ ${ram_color}%-19s${CLR_RESET}        │\n" "RAM" "$ram_status"
-    printf "│ %-17s │ ${cpu_color}%-19s${CLR_RESET}        │\n" "CPU" "$cpu_status"
-    printf "│ %-17s │ ${kvm_color}%-19s${CLR_RESET}        │\n" "KVM" "$kvm_status"
-    echo -e "└───────────────────┴────────────────────────────┘"
-    echo ""
-
-    if [[ $errors -gt 0 ]]; then
-        echo -e "${CLR_RED}Pre-flight checks failed with $errors error(s). Exiting.${CLR_RESET}"
-        exit 1
-    fi
-
-    echo -e "${CLR_GREEN}✓ All pre-flight checks passed!${CLR_RESET}"
-    echo ""
+    PREFLIGHT_ERRORS=$errors
 }
 
 # =============================================================================
