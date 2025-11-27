@@ -117,10 +117,10 @@ REPOEOF
     '
 
     # Install monitoring and system utilities
-    remote_exec_with_progress "Installing monitoring utilities" '
+    remote_exec_with_progress "Installing system utilities" '
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
-            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
+        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat zsh 2>/dev/null || {
+            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat zsh; do
                 apt-get install -yqq "$pkg" 2>/dev/null || true
             done
         }
