@@ -283,20 +283,43 @@ get_system_inputs() {
     echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
     echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
     echo ""
-    echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
-    echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
-    echo ""
-    read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
 
-    while [[ -z "$SSH_PUBLIC_KEY" ]]; do
-        echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
-        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
-    done
-
-    # Validate SSH key format
-    if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
-        echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+    # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
+    SSH_PUBLIC_KEY=""
+    if [[ -f /root/.ssh/authorized_keys ]]; then
+        # Read all valid SSH keys from authorized_keys (skip comments and empty lines)
+        SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
     fi
+
+    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+        echo -e "${CLR_GREEN}Found SSH public key from Rescue System:${CLR_RESET}"
+        echo "${SSH_PUBLIC_KEY:0:50}..."
+        echo ""
+        read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
+        if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
+            SSH_PUBLIC_KEY=""
+        fi
+    fi
+
+    # If no key found or user declined, ask for manual input
+    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+        echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
+        echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+        echo ""
+        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+
+        while [[ -z "$SSH_PUBLIC_KEY" ]]; do
+            echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+            read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+        done
+
+        # Validate SSH key format
+        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
+            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+        fi
+    fi
+
+    echo -e "${CLR_GREEN}SSH key configured.${CLR_RESET}"
 
     # Tailscale VPN Configuration (Optional)
     echo ""
