@@ -34,7 +34,7 @@ make_template_files() {
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
-    echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
 }
 
 # Configure the installed Proxmox via SSH
@@ -228,13 +228,13 @@ CEPHEOF
             # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
             TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                echo -e "${CLR_GREEN}Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+                echo -e "${CLR_GREEN}✓ Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -254,7 +254,7 @@ CEPHEOF
     remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
     remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    echo -e "${CLR_GREEN}Security hardening configured${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Security hardening configured${CLR_RESET}"
 
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
@@ -263,5 +263,5 @@ CEPHEOF
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
-    echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ QEMU process exited${CLR_RESET}"
 }

@@ -36,12 +36,7 @@ setup_qemu_config() {
 
 # Install Proxmox via QEMU
 install_proxmox() {
-    echo -e "${CLR_GREEN}Starting Proxmox VE installation...${CLR_RESET}"
     setup_qemu_config
-
-    echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, this takes about 5-10 minutes${CLR_RESET}"
-    echo ""
 
     # Run QEMU in background and show progress
     qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
@@ -49,7 +44,7 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    show_progress $! "Installing Proxmox VE to disk"
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)"
 }
 
 # Boot installed Proxmox with SSH port forwarding

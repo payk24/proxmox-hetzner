@@ -2,11 +2,27 @@
 # Finish and reboot
 # =============================================================================
 
+# Calculate and display total installation time
+show_total_time() {
+    local end_time=$(date +%s)
+    local total_seconds=$((end_time - INSTALL_START_TIME))
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+
+    if [[ $hours -gt 0 ]]; then
+        echo -e "${CLR_GREEN}Total installation time: ${hours}h ${minutes}m ${seconds}s${CLR_RESET}"
+    else
+        echo -e "${CLR_GREEN}Total installation time: ${minutes}m ${seconds}s${CLR_RESET}"
+    fi
+}
+
 # Function to reboot into the main OS
 reboot_to_main_os() {
     echo -e "${CLR_GREEN}============================================${CLR_RESET}"
     echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
     echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    show_total_time
     echo ""
     echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
     echo "  ✓ SSH public key deployed"
@@ -58,6 +74,10 @@ reboot_to_main_os() {
 # =============================================================================
 # Main execution flow
 # =============================================================================
+
+# Run pre-flight checks first
+preflight_checks
+
 detect_nvme_drives
 get_system_inputs
 prepare_packages

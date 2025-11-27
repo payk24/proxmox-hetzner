@@ -49,24 +49,24 @@ get_latest_proxmox_ve_iso() {
 
 download_proxmox_iso() {
     if [[ -f "pve.iso" ]]; then
-        echo -e "${CLR_YELLOW}Proxmox ISO file already exists, skipping download.${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Proxmox ISO already exists, skipping download${CLR_RESET}"
         return 0
     fi
 
-    echo -e "${CLR_BLUE}Downloading Proxmox ISO...${CLR_RESET}"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    # Extract ISO filename and construct checksum URL
     ISO_FILENAME=$(basename "$PROXMOX_ISO_URL")
     CHECKSUM_URL="https://enterprise.proxmox.com/iso/SHA256SUMS"
 
-    echo -e "${CLR_YELLOW}Downloading: $ISO_FILENAME${CLR_RESET}"
-
-    if ! wget -O pve.iso "$PROXMOX_ISO_URL"; then
+    # Download ISO with progress bar
+    wget -q --show-progress -O pve.iso "$PROXMOX_ISO_URL" 2>&1 &
+    show_progress $! "Downloading $ISO_FILENAME"
+    wait $!
+    if [[ $? -ne 0 ]]; then
         echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
         exit 1
     fi
@@ -77,14 +77,22 @@ download_proxmox_iso() {
         exit 1
     fi
 
-    # Verify ISO checksum
-    echo -e "${CLR_BLUE}Verifying ISO checksum...${CLR_RESET}"
-    if wget -q -O SHA256SUMS "$CHECKSUM_URL"; then
+    # Verify ISO checksum with progress
+    wget -q -O SHA256SUMS "$CHECKSUM_URL" 2>/dev/null &
+    show_progress $! "Downloading checksum"
+    wait $!
+
+    if [[ -f "SHA256SUMS" ]]; then
         EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
         if [[ -n "$EXPECTED_CHECKSUM" ]]; then
-            ACTUAL_CHECKSUM=$(sha256sum pve.iso | awk '{print $1}')
+            sha256sum pve.iso > /tmp/iso_checksum.txt 2>/dev/null &
+            show_progress $! "Verifying ISO checksum"
+            wait $!
+            ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
+            rm -f /tmp/iso_checksum.txt
+
             if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                echo -e "${CLR_GREEN}ISO checksum verified successfully.${CLR_RESET}"
+                echo -e "${CLR_GREEN}✓ ISO checksum verified${CLR_RESET}"
             else
                 echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
                 echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
@@ -93,14 +101,12 @@ download_proxmox_iso() {
                 exit 1
             fi
         else
-            echo -e "${CLR_YELLOW}Warning: Could not find checksum for $ISO_FILENAME, skipping verification.${CLR_RESET}"
+            echo -e "${CLR_YELLOW}⚠ Could not find checksum for $ISO_FILENAME${CLR_RESET}"
         fi
         rm -f SHA256SUMS
     else
-        echo -e "${CLR_YELLOW}Warning: Could not download checksum file, skipping verification.${CLR_RESET}"
+        echo -e "${CLR_YELLOW}⚠ Could not download checksum file${CLR_RESET}"
     fi
-
-    echo -e "${CLR_GREEN}Proxmox ISO downloaded.${CLR_RESET}"
 }
 
 make_answer_toml() {
@@ -134,11 +140,11 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}answer.toml created (ZFS $ZFS_RAID mode).${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ answer.toml created (ZFS $ZFS_RAID mode)${CLR_RESET}"
 }
 
 make_autoinstall_iso() {
     echo -e "${CLR_BLUE}Making autoinstall.iso...${CLR_RESET}"
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso
-    echo -e "${CLR_GREEN}pve-autoinstall.iso created.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ pve-autoinstall.iso created${CLR_RESET}"
 }
