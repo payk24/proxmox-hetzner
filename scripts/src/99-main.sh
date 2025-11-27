@@ -2,59 +2,73 @@
 # Finish and reboot
 # =============================================================================
 
-# Calculate and display total installation time
-show_total_time() {
+# Function to reboot into the main OS
+reboot_to_main_os() {
+    local inner_width=$((MENU_BOX_WIDTH - 6))
+
+    # Build summary content
+    local summary=""
+
+    # Calculate duration
     local end_time=$(date +%s)
     local total_seconds=$((end_time - INSTALL_START_TIME))
     local duration=$(format_duration $total_seconds)
-    print_success "Total installation time: ${duration}"
-}
 
-# Function to reboot into the main OS
-reboot_to_main_os() {
-    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
-    echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
-    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
-    show_total_time
-    echo ""
-    echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
-    echo "  ✓ SSH public key deployed"
-    echo "  ✓ Password authentication DISABLED"
-    echo "  ✓ CPU governor set to performance"
-    echo "  ✓ Kernel parameters optimized for virtualization"
-    echo "  ✓ Subscription notice removed"
-    echo ""
-    echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
-    echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
-    echo "  ✓ VM image tools: libguestfs-tools"
-    echo "  ✓ ZFS ARC memory limits configured"
-    echo "  ✓ nf_conntrack optimized for high connection counts"
-    echo "  ✓ NTP time sync (chrony) with Hetzner servers"
-    echo "  ✓ Dynamic MOTD with system status"
-    echo "  ✓ Unattended security upgrades (kernel excluded)"
+    summary+="[OK]|Installation time|${duration}"$'\n'
+    summary+="|--- Security ---|"$'\n'
+    summary+="[OK]|SSH public key|deployed"$'\n'
+    summary+="[OK]|Password auth|DISABLED"$'\n'
+    summary+="[OK]|CPU governor|performance"$'\n'
+    summary+="[OK]|Kernel params|optimized"$'\n'
+    summary+="[OK]|Subscription notice|removed"$'\n'
+    summary+="|--- Optimizations ---|"$'\n'
+    summary+="[OK]|Monitoring tools|btop, iotop, ncdu, tmux..."$'\n'
+    summary+="[OK]|VM image tools|libguestfs-tools"$'\n'
+    summary+="[OK]|ZFS ARC limits|configured"$'\n'
+    summary+="[OK]|nf_conntrack|optimized"$'\n'
+    summary+="[OK]|NTP sync|chrony (Hetzner)"$'\n'
+    summary+="[OK]|Dynamic MOTD|enabled"$'\n'
+    summary+="[OK]|Security updates|unattended"$'\n'
+
+    # Tailscale status
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
+        summary+="[OK]|Tailscale VPN|installed"$'\n'
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            echo "  ✓ Tailscale authenticated (IP: ${TAILSCALE_IP:-pending})"
+            summary+="[OK]|Tailscale IP|${TAILSCALE_IP:-pending}"$'\n'
         else
-            echo "  ⚠ Tailscale needs authentication after reboot:"
-            echo "      tailscale up --ssh"
-            echo "      tailscale serve --bg --https=443 https://127.0.0.1:8006"
+            summary+="[WARN]|Tailscale|needs auth after reboot"$'\n'
         fi
     fi
-    echo ""
-    echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
-    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
-    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
+
+    summary+="|--- Access ---|"$'\n'
+    summary+="[OK]|Web UI|https://${MAIN_IPV4_CIDR%/*}:8006"$'\n'
+    summary+="[OK]|SSH|root@${MAIN_IPV4_CIDR%/*}"
+
     if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
+        summary+=$'\n'"[OK]|Tailscale SSH|root@${TAILSCALE_IP}"
         if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-            echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
+            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
         else
-            echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
+            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_IP}:8006"
         fi
     fi
+
+    # Display with boxes
+    {
+        echo "INSTALLATION COMPLETE"
+        echo "$summary" | column -t -s '|' | while IFS= read -r line; do
+            printf "%-${inner_width}s\n" "$line"
+        done
+    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | colorize_status
     echo ""
+
+    # Show Tailscale auth instructions if needed
+    if [[ "$INSTALL_TAILSCALE" == "yes" && -z "$TAILSCALE_AUTH_KEY" ]]; then
+        print_warning "Tailscale needs authentication after reboot:"
+        echo "    tailscale up --ssh"
+        echo "    tailscale serve --bg --https=443 https://127.0.0.1:8006"
+        echo ""
+    fi
 
     # Ask user to reboot the system
     read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
