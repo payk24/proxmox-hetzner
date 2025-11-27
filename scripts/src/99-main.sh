@@ -6,15 +6,8 @@
 show_total_time() {
     local end_time=$(date +%s)
     local total_seconds=$((end_time - INSTALL_START_TIME))
-    local hours=$((total_seconds / 3600))
-    local minutes=$(((total_seconds % 3600) / 60))
-    local seconds=$((total_seconds % 60))
-
-    if [[ $hours -gt 0 ]]; then
-        echo -e "${CLR_GREEN}Total installation time: ${hours}h ${minutes}m ${seconds}s${CLR_RESET}"
-    else
-        echo -e "${CLR_GREEN}Total installation time: ${minutes}m ${seconds}s${CLR_RESET}"
-    fi
+    local duration=$(format_duration $total_seconds)
+    print_success "Total installation time: ${duration}"
 }
 
 # Function to reboot into the main OS
@@ -60,13 +53,13 @@ reboot_to_main_os() {
     fi
     echo ""
 
-    #ask user to reboot the system
+    # Ask user to reboot the system
     read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
-        echo -e "${CLR_YELLOW}Rebooting the system...${CLR_RESET}"
+        print_info "Rebooting the system..."
         reboot
     else
-        echo -e "${CLR_YELLOW}Exiting...${CLR_RESET}"
+        print_info "Exiting..."
         exit 0
     fi
 }
@@ -87,7 +80,7 @@ install_proxmox
 
 # Boot and configure via SSH
 boot_proxmox_with_port_forwarding || {
-    echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
+    print_error "Failed to boot Proxmox with port forwarding. Exiting."
     exit 1
 }
 

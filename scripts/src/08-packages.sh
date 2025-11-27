@@ -9,8 +9,8 @@ prepare_packages() {
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
     show_progress $! "Downloading Proxmox GPG key"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to download Proxmox GPG key! Exiting."
         exit 1
     fi
 
@@ -19,8 +19,8 @@ prepare_packages() {
     apt update > /dev/null 2>&1 &
     show_progress $! "Updating package lists"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to update package lists! Exiting."
         exit 1
     fi
 
@@ -28,8 +28,8 @@ prepare_packages() {
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
     show_progress $! "Installing packages"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to install required packages! Exiting."
         exit 1
     fi
 }
@@ -49,13 +49,13 @@ get_latest_proxmox_ve_iso() {
 
 download_proxmox_iso() {
     if [[ -f "pve.iso" ]]; then
-        echo -e "${CLR_GREEN}✓ Proxmox ISO already exists, skipping download${CLR_RESET}"
+        print_success "Proxmox ISO already exists, skipping download"
         return 0
     fi
 
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
-        echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
+        print_error "Failed to retrieve Proxmox ISO URL! Exiting."
         exit 1
     fi
 
@@ -67,12 +67,12 @@ download_proxmox_iso() {
     show_progress $! "Downloading $ISO_FILENAME"
     wait $!
     if [[ $? -ne 0 ]]; then
-        echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
+        print_error "Failed to download Proxmox ISO! Exiting."
         exit 1
     fi
 
     if [[ ! -s "pve.iso" ]]; then
-        echo -e "${CLR_RED}Downloaded ISO file is empty or corrupted! Exiting.${CLR_RESET}"
+        print_error "Downloaded ISO file is empty or corrupted! Exiting."
         rm -f pve.iso
         exit 1
     fi
@@ -92,25 +92,25 @@ download_proxmox_iso() {
             rm -f /tmp/iso_checksum.txt
 
             if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                echo -e "${CLR_GREEN}✓ ISO checksum verified${CLR_RESET}"
+                print_success "ISO checksum verified"
             else
-                echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
-                echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
-                echo -e "${CLR_RED}Actual:   $ACTUAL_CHECKSUM${CLR_RESET}"
+                print_error "ISO checksum verification FAILED!"
+                print_error "Expected: $EXPECTED_CHECKSUM"
+                print_error "Actual:   $ACTUAL_CHECKSUM"
                 rm -f pve.iso SHA256SUMS
                 exit 1
             fi
         else
-            echo -e "${CLR_YELLOW}⚠ Could not find checksum for $ISO_FILENAME${CLR_RESET}"
+            print_warning "Could not find checksum for $ISO_FILENAME"
         fi
         rm -f SHA256SUMS
     else
-        echo -e "${CLR_YELLOW}⚠ Could not download checksum file${CLR_RESET}"
+        print_warning "Could not download checksum file"
     fi
 }
 
 make_answer_toml() {
-    echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
+    print_info "Making answer.toml..."
 
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
@@ -145,11 +145,11 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}✓ answer.toml created (ZFS $ZFS_RAID mode)${CLR_RESET}"
+    print_success "answer.toml created (ZFS $ZFS_RAID mode)"
 }
 
 make_autoinstall_iso() {
-    echo -e "${CLR_BLUE}Making autoinstall.iso...${CLR_RESET}"
+    print_info "Making autoinstall.iso..."
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso
-    echo -e "${CLR_GREEN}✓ pve-autoinstall.iso created${CLR_RESET}"
+    print_success "pve-autoinstall.iso created"
 }
