@@ -172,35 +172,6 @@ CONNTRACKEOF
         fi
 SUBEOF
 
-    # Hide Ceph from UI (not needed for single-server setup)
-    print_info "Hiding Ceph from UI..."
-    remote_exec_script << 'CEPHEOF'
-        # Create custom CSS to hide Ceph-related UI elements
-        CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-        cat > "$CUSTOM_CSS" << 'CSS'
-/* Hide Ceph menu items - not needed for single server */
-#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
-.x-treelist-item-text:has-text("Ceph") { display: none !important; }
-tr[data-qtip*="Ceph"] { display: none !important; }
-CSS
-
-        # Add custom CSS to index template if not already added
-        INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-        if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-            sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-        fi
-
-        # Alternative: patch JavaScript to hide Ceph panel completely
-        PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-        if [ -f "$PVE_MANAGER_JS" ]; then
-            if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
-            fi
-        fi
-
-        systemctl restart pveproxy.service
-CEPHEOF
-
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         remote_exec_with_progress "Installing Tailscale VPN" '
