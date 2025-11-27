@@ -67,8 +67,10 @@ get_system_inputs() {
         INTERFACE_NAME="$DEFAULT_INTERFACE"
     fi
 
-    # Prompt user for interface name
-    if [[ "$NON_INTERACTIVE" != true ]]; then
+    # Prompt user for interface name or display in non-interactive mode
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        echo -e "${CLR_GREEN}✓ Network interface: ${INTERFACE_NAME}${CLR_RESET}"
+    else
         echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
         local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
         read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
@@ -103,6 +105,26 @@ get_system_inputs() {
         BRIDGE_MODE="${BRIDGE_MODE:-internal}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
+        # Display configuration values in non-interactive mode
+        echo -e "${CLR_GREEN}✓ Hostname: ${PVE_HOSTNAME}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Domain: ${DOMAIN_SUFFIX}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Timezone: ${TIMEZONE}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Email: ${EMAIL}${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Bridge mode: ${BRIDGE_MODE}${CLR_RESET}"
+        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+            echo -e "${CLR_GREEN}✓ Private subnet: ${PRIVATE_SUBNET}${CLR_RESET}"
+        fi
+
+        # ZFS RAID mode default in non-interactive mode
+        if [[ -z "$ZFS_RAID" ]]; then
+            if [[ "${NVME_COUNT:-0}" -ge 2 ]]; then
+                ZFS_RAID="raid1"  # Default to mirror for redundancy
+            else
+                ZFS_RAID="single"
+            fi
+        fi
+        echo -e "${CLR_GREEN}✓ ZFS mode: ${ZFS_RAID}${CLR_RESET}"
+
         # Password handling in non-interactive mode
         if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
             echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
@@ -128,7 +150,15 @@ get_system_inputs() {
         if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
             TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
             TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
-            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓ Tailscale will be installed (auto-connect)${CLR_RESET}"
+            else
+                echo -e "${CLR_GREEN}✓ Tailscale will be installed (manual auth required)${CLR_RESET}"
+            fi
+            echo -e "${CLR_GREEN}✓ Tailscale SSH: ${TAILSCALE_SSH}${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓ Tailscale WebUI: ${TAILSCALE_WEBUI}${CLR_RESET}"
+        else
+            echo -e "${CLR_GREEN}✓ Tailscale: skipped${CLR_RESET}"
         fi
     else
         # =====================================================================
