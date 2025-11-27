@@ -949,11 +949,11 @@ get_system_inputs() {
                 local content=""
                 for i in "${!options[@]}"; do
                     if [ $i -eq $selected ]; then
-                        content+="[*]|${labels[$i]}"$'\n'
-                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                        content+="[*] ${labels[$i]}"$'\n'
+                        content+="    └─ ${descriptions[$i]}"$'\n'
                     else
-                        content+="[ ]|${labels[$i]}"$'\n'
-                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                        content+="[ ] ${labels[$i]}"$'\n'
+                        content+="    └─ ${descriptions[$i]}"$'\n'
                     fi
                 done
                 # Remove trailing newline
@@ -961,7 +961,7 @@ get_system_inputs() {
 
                 {
                     echo "ZFS Storage Mode (↑/↓ select, Enter confirm)"
-                    echo "$content" | column -t -s '|'
+                    echo "$content"
                 } | boxes -d stone -p a1
             }
 
@@ -972,7 +972,11 @@ get_system_inputs() {
             tput sc
 
             while true; do
-                # Move cursor to saved position
+                # Move cursor to saved position and clear lines
+                tput rc
+                for ((i=0; i<box_lines; i++)); do
+                    printf "\033[K\n"
+                done
                 tput rc
 
                 # Draw the menu with colors (use $'...' for literal escape codes to avoid sed backreference issues)
@@ -1101,11 +1105,11 @@ get_system_inputs() {
                 content+=""$'\n'
                 for i in "${!options[@]}"; do
                     if [ $i -eq $selected ]; then
-                        content+="[*]|${labels[$i]}"$'\n'
-                        content+="|  ^-- ${descriptions[$i]}"$'\n'
+                        content+="[*] ${labels[$i]}"$'\n'
+                        content+="    ^-- ${descriptions[$i]}"$'\n'
                     else
-                        content+="[ ]|${labels[$i]}"$'\n'
-                        content+="|  ^-- ${descriptions[$i]}"$'\n'
+                        content+="[ ] ${labels[$i]}"$'\n'
+                        content+="    ^-- ${descriptions[$i]}"$'\n'
                     fi
                 done
                 # Remove trailing newline
@@ -1113,7 +1117,7 @@ get_system_inputs() {
 
                 {
                     echo "SSH Public Key (^/v select, Enter confirm)"
-                    echo "$content" | column -t -s '|'
+                    echo "$content"
                 } | boxes -d stone -p a1
             }
 
@@ -1124,7 +1128,11 @@ get_system_inputs() {
             tput sc
 
             while true; do
-                # Move cursor to saved position
+                # Move cursor to saved position and clear lines
+                tput rc
+                for ((i=0; i<box_lines; i++)); do
+                    printf "\033[K\n"
+                done
                 tput rc
 
                 # Draw the menu with colors
@@ -1265,11 +1273,11 @@ get_system_inputs() {
             content+=""$'\n'
             for i in "${!options[@]}"; do
                 if [ $i -eq $selected ]; then
-                    content+="[*]|${labels[$i]}"$'\n'
-                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                    content+="[*] ${labels[$i]}"$'\n'
+                    content+="    ^-- ${descriptions[$i]}"$'\n'
                 else
-                    content+="[ ]|${labels[$i]}"$'\n'
-                    content+="|  ^-- ${descriptions[$i]}"$'\n'
+                    content+="[ ] ${labels[$i]}"$'\n'
+                    content+="    ^-- ${descriptions[$i]}"$'\n'
                 fi
             done
             # Remove trailing newline
@@ -1277,7 +1285,7 @@ get_system_inputs() {
 
             {
                 echo "Tailscale VPN - Optional (^/v select, Enter confirm)"
-                echo "$content" | column -t -s '|'
+                echo "$content"
             } | boxes -d stone -p a1
         }
 
@@ -1288,7 +1296,11 @@ get_system_inputs() {
         tput sc
 
         while true; do
-            # Move cursor to saved position
+            # Move cursor to saved position and clear lines
+            tput rc
+            for ((i=0; i<box_lines; i++)); do
+                printf "\033[K\n"
+            done
             tput rc
 
             # Draw the menu with colors
