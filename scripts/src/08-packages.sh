@@ -77,10 +77,8 @@ download_proxmox_iso() {
         exit 1
     fi
 
-    # Verify ISO checksum with progress
-    wget -q -O SHA256SUMS "$CHECKSUM_URL" 2>/dev/null &
-    show_progress $! "Downloading checksum"
-    wait $!
+    # Download ISO checksum
+    wget -q -O SHA256SUMS "$CHECKSUM_URL" 2>/dev/null
 
     if [[ -f "SHA256SUMS" ]]; then
         EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
