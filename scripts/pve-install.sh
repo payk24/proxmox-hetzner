@@ -2,7 +2,9 @@
 set -e
 cd /root
 
-# Define colors for output
+# =============================================================================
+# Colors and configuration
+# =============================================================================
 CLR_RED="\033[1;31m"
 CLR_GREEN="\033[1;32m"
 CLR_YELLOW="\033[1;33m"
@@ -11,7 +13,11 @@ CLR_RESET="\033[m"
 
 clear
 
-# Function to download files with error handling
+# =============================================================================
+# Helper functions
+# =============================================================================
+
+# Download files with retry
 download_file() {
     local output_file="$1"
     local url="$2"
@@ -36,7 +42,124 @@ download_file() {
     exit 1
 }
 
+# Function to read password with asterisks shown for each character
+read_password() {
+    local prompt="$1"
+    local password=""
+    local char=""
+
+    echo -n "$prompt"
+
+    while IFS= read -r -s -n1 char; do
+        if [[ -z "$char" ]]; then
+            break
+        fi
+        if [[ "$char" == $'\x7f' || "$char" == $'\x08' ]]; then
+            if [[ -n "$password" ]]; then
+                password="${password%?}"
+                echo -ne "\b \b"
+            fi
+        else
+            password+="$char"
+            echo -n "*"
+        fi
+    done
+
+    echo ""
+    echo "$password"
+}
+
+# SSH helper functions to reduce duplication
+SSH_OPTS="-o StrictHostKeyChecking=no"
+SSH_PORT="5555"
+
+remote_exec() {
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "$@"
+}
+
+remote_exec_script() {
+    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s'
+}
+
+remote_copy() {
+    local src="$1"
+    local dst="$2"
+    sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst"
+}
+
+# Prompt with validation loop
+prompt_validated() {
+    local prompt="$1"
+    local default="$2"
+    local validator="$3"
+    local error_msg="$4"
+    local result=""
+
+    while true; do
+        read -e -p "$prompt" -i "$default" result
+        if $validator "$result"; then
+            echo "$result"
+            return 0
+        fi
+        echo -e "${CLR_RED}${error_msg}${CLR_RESET}"
+    done
+}
+
+# Progress indicator with spinner and elapsed time
+show_progress() {
+    local pid=$1
+    local message="${2:-Processing}"
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local start_time=$(date +%s)
+    local i=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep 0.2
+    done
+
+    local total=$(($(date +%s) - start_time))
+    local mins=$((total / 60))
+    local secs=$((total % 60))
+    printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+}
+
+# Wait for condition with progress
+wait_with_progress() {
+    local message="$1"
+    local timeout="$2"
+    local check_cmd="$3"
+    local interval="${4:-5}"
+    local start_time=$(date +%s)
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+
+    while true; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+
+        if eval "$check_cmd" 2>/dev/null; then
+            printf "\r${CLR_GREEN}✓ %s [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 0
+        fi
+
+        if [ $elapsed -ge $timeout ]; then
+            printf "\r${CLR_RED}✗ %s timed out [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 1
+        fi
+
+        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep "$interval"
+    done
+}
+
+# =============================================================================
 # Input validation functions
+# =============================================================================
 validate_hostname() {
     local hostname="$1"
     # Hostname: alphanumeric and hyphens, 1-63 chars, cannot start/end with hyphen
@@ -96,7 +219,9 @@ validate_timezone() {
     return 1
 }
 
-# Function to detect NVMe drives
+# =============================================================================
+# Hardware detection
+# =============================================================================
 detect_nvme_drives() {
     echo -e "${CLR_BLUE}Detecting NVMe drives...${CLR_RESET}"
 
@@ -214,20 +339,17 @@ get_system_inputs() {
 
     # Get user input for other configuration with validation
     while true; do
-        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
+        read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "pve" HOSTNAME
         if validate_hostname "$HOSTNAME"; then
             break
         fi
         echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
     done
 
-    while true; do
-        read -e -p "Enter your FQDN name : " -i "proxmox.local" FQDN
-        if validate_fqdn "$FQDN"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid FQDN. Use format: hostname.domain.tld${CLR_RESET}"
-    done
+    # Domain suffix for FQDN (hostname.domain)
+    read -e -p "Enter domain suffix: " -i "local" DOMAIN_SUFFIX
+    FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
+    echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
     while true; do
         read -e -p "Enter your timezone : " -i "Europe/Kyiv" TIMEZONE
@@ -253,8 +375,8 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-    echo ""
+    # Read password with asterisks displayed
+    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
@@ -264,12 +386,11 @@ get_system_inputs() {
     SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
     # Create the full CIDR notation for the first IP
     PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
-    
+
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-        # Print message in a new line
-        read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-        echo ""
+        echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
     done
 
     echo ""
@@ -283,20 +404,43 @@ get_system_inputs() {
     echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
     echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
     echo ""
-    echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
-    echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
-    echo ""
-    read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
 
-    while [[ -z "$SSH_PUBLIC_KEY" ]]; do
-        echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
-        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
-    done
-
-    # Validate SSH key format
-    if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
-        echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+    # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
+    SSH_PUBLIC_KEY=""
+    if [[ -f /root/.ssh/authorized_keys ]]; then
+        # Read all valid SSH keys from authorized_keys (skip comments and empty lines)
+        SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
     fi
+
+    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+        echo -e "${CLR_GREEN}Found SSH public key from Rescue System:${CLR_RESET}"
+        echo "${SSH_PUBLIC_KEY:0:50}..."
+        echo ""
+        read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
+        if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
+            SSH_PUBLIC_KEY=""
+        fi
+    fi
+
+    # If no key found or user declined, ask for manual input
+    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+        echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
+        echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+        echo ""
+        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+
+        while [[ -z "$SSH_PUBLIC_KEY" ]]; do
+            echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+            read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+        done
+
+        # Validate SSH key format
+        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
+            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+        fi
+    fi
+
+    echo -e "${CLR_GREEN}SSH key configured.${CLR_RESET}"
 
     # Tailscale VPN Configuration (Optional)
     echo ""
@@ -335,7 +479,6 @@ get_system_inputs() {
         echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
     fi
 }
-
 
 prepare_packages() {
     echo -e "${CLR_BLUE}Installing packages...${CLR_RESET}"
@@ -469,96 +612,71 @@ make_autoinstall_iso() {
 }
 
 is_uefi_mode() {
-  [ -d /sys/firmware/efi ]
+    [ -d /sys/firmware/efi ]
 }
 
-# Install Proxmox via QEMU/VNC
+# Configure QEMU settings (shared between install and boot)
+setup_qemu_config() {
+    # UEFI configuration
+    if is_uefi_mode; then
+        UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
+        echo -e "${CLR_YELLOW}UEFI mode detected${CLR_RESET}"
+    else
+        UEFI_OPTS=""
+        echo -e "${CLR_YELLOW}Legacy BIOS mode${CLR_RESET}"
+    fi
+
+    # CPU and RAM configuration
+    local available_cores=$(nproc)
+    local available_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+
+    QEMU_CORES=$((available_cores / 2))
+    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
+    [ $QEMU_CORES -gt $available_cores ] && QEMU_CORES=$available_cores
+    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
+
+    QEMU_RAM=8192
+    [ $available_ram_mb -lt 16384 ] && QEMU_RAM=4096
+
+    # Drive configuration
+    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
+    [ -n "$NVME_DRIVE_2" ] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+}
+
+# Install Proxmox via QEMU
 install_proxmox() {
     echo -e "${CLR_GREEN}Starting Proxmox VE installation...${CLR_RESET}"
-
-    if is_uefi_mode; then
-        UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        echo -e "UEFI Supported! Booting with UEFI firmware."
-    else
-        UEFI_OPTS=""
-        echo -e "UEFI Not Supported! Booting in legacy mode."
-    fi
-
-    # Detect available CPU cores and RAM for optimal QEMU performance
-    AVAILABLE_CORES=$(nproc)
-    AVAILABLE_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
-    # Use half of available cores (min 2, max 16, but never exceed available)
-    QEMU_CORES=$((AVAILABLE_CORES / 2))
-    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
-    [ $QEMU_CORES -gt $AVAILABLE_CORES ] && QEMU_CORES=$AVAILABLE_CORES
-    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
-    QEMU_RAM=8192
-    [ $AVAILABLE_RAM_MB -lt 16384 ] && QEMU_RAM=4096
+    setup_qemu_config
 
     echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
-    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RESET}"
-    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+    echo -e "${CLR_RED}Do NOT do anything, this takes about 5-10 minutes${CLR_RESET}"
+    echo ""
 
-    # Build QEMU drive arguments based on detected NVMe drives
-    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
-    if [ -n "$NVME_DRIVE_2" ]; then
-        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
-    fi
-
-    qemu-system-x86_64 \
-        -enable-kvm $UEFI_OPTS \
+    # Run QEMU in background and show progress
+    qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -smp $QEMU_CORES -m $QEMU_RAM \
         -boot d -cdrom ./pve-autoinstall.iso \
-        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1
+        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
+
+    show_progress $! "Installing Proxmox VE to disk"
 }
 
-# Function to boot the installed Proxmox via QEMU with port forwarding
+# Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
     echo -e "${CLR_GREEN}Booting installed Proxmox with SSH port forwarding...${CLR_RESET}"
+    setup_qemu_config
 
-    if is_uefi_mode; then
-        UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        echo -e "${CLR_YELLOW}UEFI Supported! Booting with UEFI firmware.${CLR_RESET}"
-    else
-        UEFI_OPTS=""
-        echo -e "${CLR_YELLOW}UEFI Not Supported! Booting in legacy mode.${CLR_RESET}"
-    fi
-
-    # Build QEMU drive arguments based on detected NVMe drives
-    DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
-    if [ -n "$NVME_DRIVE_2" ]; then
-        DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
-    fi
-
-    # Start QEMU in background with port forwarding
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
         -smp $QEMU_CORES -m $QEMU_RAM \
         $DRIVE_ARGS -display none \
         > qemu_output.log 2>&1 &
-    
+
     QEMU_PID=$!
-    echo -e "${CLR_YELLOW}QEMU started with PID: $QEMU_PID${CLR_RESET}"
-    
-    # Wait for SSH to become available on port 5555
-    echo -e "${CLR_YELLOW}Waiting for SSH to become available on port 5555...${CLR_RESET}"
-    for i in {1..60}; do
-        # Use bash built-in /dev/tcp instead of nc for better compatibility with Rescue System
-        if (echo >/dev/tcp/localhost/5555) 2>/dev/null; then
-            echo -e "${CLR_GREEN}SSH is available on port 5555.${CLR_RESET}"
-            break
-        fi
-        echo -n "."
-        sleep 5
-        if [ $i -eq 60 ]; then
-            echo -e "${CLR_RED}SSH is not available after 5 minutes. Check the system manually.${CLR_RESET}"
-            return 1
-        fi
-    done
-    
-    return 0
+
+    # Wait for SSH with progress indicator (timeout 5 minutes)
+    wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
 }
 
 make_template_files() {
@@ -596,29 +714,28 @@ make_template_files() {
     echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
 }
 
-# Function to configure the installed Proxmox via SSH
+# Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
     echo -e "${CLR_BLUE}Starting post-installation configuration via SSH...${CLR_RESET}"
     make_template_files
-	ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
-    # copy template files to the server using scp
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/hosts root@localhost:/etc/hosts
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/interfaces root@localhost:/etc/network/interfaces
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/99-proxmox.conf root@localhost:/etc/sysctl.d/99-proxmox.conf
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/debian.sources root@localhost:/etc/apt/sources.list.d/debian.sources
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/proxmox.sources root@localhost:/etc/apt/sources.list.d/proxmox.sources
-	
-    # comment out the line in the sources.list file
-    #sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "sed -i 's/^\([^#].*\)/# \1/g' /etc/apt/sources.list.d/pve-enterprise.list"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
-    # Configure DNS servers
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' | tee /etc/resolv.conf"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$HOSTNAME' > /etc/hostname"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "systemctl disable --now rpcbind rpcbind.socket"
+    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
-    # Configure ZFS ARC memory limits based on system RAM
+    # Copy template files
+    remote_copy "template_files/hosts" "/etc/hosts"
+    remote_copy "template_files/interfaces" "/etc/network/interfaces"
+    remote_copy "template_files/99-proxmox.conf" "/etc/sysctl.d/99-proxmox.conf"
+    remote_copy "template_files/debian.sources" "/etc/apt/sources.list.d/debian.sources"
+    remote_copy "template_files/proxmox.sources" "/etc/apt/sources.list.d/proxmox.sources"
+
+    # Basic system configuration
+    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
+    remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
+    remote_exec "echo '$HOSTNAME' > /etc/hostname"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket"
+
+    # Configure ZFS ARC memory limits
     echo -e "${CLR_YELLOW}Configuring ZFS ARC memory limits...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'ZFSEOF'
+    remote_exec_script << 'ZFSEOF'
         # Get total RAM in bytes
         TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
         TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
@@ -646,9 +763,9 @@ configure_proxmox_via_ssh() {
         echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
 ZFSEOF
 
-    # Disable enterprise repositories BEFORE apt update (they require subscription)
+    # Disable enterprise repositories
     echo -e "${CLR_YELLOW}Disabling enterprise repositories...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'REPOEOF'
+    remote_exec_script << 'REPOEOF'
         # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
         # These require a paid subscription and cause 401 errors
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
@@ -666,9 +783,54 @@ ZFSEOF
         fi
 REPOEOF
 
-    # Configure CPU governor for performance
+    # Update all system packages
+    echo -e "${CLR_YELLOW}Updating system packages...${CLR_RESET}"
+    remote_exec_script << 'UPDATEEOF'
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get dist-upgrade -yqq
+        echo "System packages updated"
+UPDATEEOF
+
+    # Install monitoring and system utilities
+    echo -e "${CLR_YELLOW}Installing monitoring and system utilities...${CLR_RESET}"
+    remote_exec_script << 'UTILSEOF'
+        export DEBIAN_FRONTEND=noninteractive
+
+        # Install monitoring & system utilities
+        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
+            echo "Some packages may not be available, installing what we can..."
+            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
+                apt-get install -yqq "$pkg" 2>/dev/null || echo "Package $pkg not available"
+            done
+        }
+
+        # Optional: for VM image manipulation
+        apt-get install -yqq libguestfs-tools 2>/dev/null || echo "libguestfs-tools not available"
+
+        echo "Monitoring utilities installed"
+UTILSEOF
+
+    # Configure nf_conntrack
+    echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
+    remote_exec_script << 'CONNTRACKEOF'
+        # Add nf_conntrack module to load at boot
+        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
+            echo "nf_conntrack" >> /etc/modules
+        fi
+
+        # Configure connection tracking limits
+        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
+            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
+            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
+        fi
+
+        echo "nf_conntrack configured"
+CONNTRACKEOF
+
+    # Configure CPU governor
     echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'CPUEOF'
+    remote_exec_script << 'CPUEOF'
         # Install cpufrequtils for CPU governor management (will work on bare metal after reboot)
         # Note: enterprise repos already disabled above, so apt update should work without 401 errors
         apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || true
@@ -689,7 +851,7 @@ CPUEOF
 
     # Remove Proxmox subscription notice
     echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'SUBEOF'
+    remote_exec_script << 'SUBEOF'
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
@@ -699,10 +861,42 @@ CPUEOF
         fi
 SUBEOF
 
+    # Hide Ceph from UI (not needed for single-server setup)
+    echo -e "${CLR_YELLOW}Hiding Ceph from UI...${CLR_RESET}"
+    remote_exec_script << 'CEPHEOF'
+        # Create custom CSS to hide Ceph-related UI elements
+        CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
+        cat > "$CUSTOM_CSS" << 'CSS'
+/* Hide Ceph menu items - not needed for single server */
+#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
+.x-treelist-item-text:has-text("Ceph") { display: none !important; }
+tr[data-qtip*="Ceph"] { display: none !important; }
+CSS
+
+        # Add custom CSS to index template if not already added
+        INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
+        if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
+            sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
+            echo "Custom CSS added to hide Ceph"
+        fi
+
+        # Alternative: patch JavaScript to hide Ceph panel completely
+        PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
+        if [ -f "$PVE_MANAGER_JS" ]; then
+            # Hide Ceph from node tree navigation
+            if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
+                sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
+            fi
+        fi
+
+        systemctl restart pveproxy.service
+        echo "Ceph UI elements hidden"
+CEPHEOF
+
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo -e "${CLR_YELLOW}Installing Tailscale VPN...${CLR_RESET}"
-        sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'TAILSCALEEOF'
+        remote_exec_script << 'TAILSCALEEOF'
             # Add Tailscale repository and install
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
@@ -729,23 +923,17 @@ TAILSCALEEOF
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             echo -e "${CLR_YELLOW}Authenticating Tailscale with provided auth key...${CLR_RESET}"
-            sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "$TAILSCALE_UP_CMD"
+            remote_exec "$TAILSCALE_UP_CMD"
 
             # Get Tailscale IP and hostname for display
-            TAILSCALE_IP=$(sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale ip -4" 2>/dev/null || echo "pending")
-            TAILSCALE_HOSTNAME=$(sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
+            TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
+            TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
             echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
 
-            # Configure Tailscale Serve for Proxmox Web UI if requested
+            # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
-                sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'bash -s' << 'TAILSCALESERVEEOF'
-                    # Configure tailscale serve to proxy HTTPS traffic to Proxmox Web UI
-                    # Port 443 on Tailscale will forward to localhost:8006 (Proxmox)
-                    tailscale serve --bg --https=443 https://127.0.0.1:8006
-
-                    echo "Tailscale Serve configured for Proxmox Web UI"
-TAILSCALESERVEEOF
+                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
                 echo -e "${CLR_GREEN}Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
             fi
         else
@@ -758,143 +946,24 @@ TAILSCALESERVEEOF
         fi
     fi
 
-    # Deploy SSH hardening LAST (after all other SSH operations, since it disables password auth)
-    echo -e "${CLR_YELLOW}Deploying SSH hardening and security configurations...${CLR_RESET}"
+    # Deploy SSH hardening LAST (after all other operations)
+    echo -e "${CLR_YELLOW}Deploying SSH hardening...${CLR_RESET}"
 
     # Deploy SSH public key FIRST (before disabling password auth!)
-    echo -e "${CLR_YELLOW}Deploying SSH public key...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+    remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+    remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+    remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    # Copy hardened sshd_config (disables password authentication)
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P 5555 -o StrictHostKeyChecking=no template_files/sshd_config root@localhost:/etc/ssh/sshd_config
+    echo -e "${CLR_GREEN}Security hardening configured${CLR_RESET}"
 
-    echo -e "${CLR_GREEN}Security hardening configured:${CLR_RESET}"
-    echo "  - SSH: Key-only authentication, modern ciphers"
-    echo "  - CPU governor: Performance mode"
-
-    # NOTE: UEFI boot order must be configured from the Rescue System (not inside QEMU)
-    # because QEMU uses virtual OVMF firmware, not the physical server's UEFI.
-    # The configure_uefi_boot_order() function handles this after QEMU exits.
-
-    # Power off the VM BEFORE restarting sshd (while password auth still works)
-    # This ensures we can connect and poweroff the VM
+    # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
-    sshpass -p "$NEW_ROOT_PASSWORD" ssh -p 5555 -o StrictHostKeyChecking=no root@localhost 'poweroff' || true
+    remote_exec "poweroff" || true
 
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
     echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
-}
-
-# Configure UEFI boot order from Rescue System (affects physical UEFI firmware)
-# This must run AFTER QEMU exits and BEFORE rebooting to the installed OS
-configure_uefi_boot_order() {
-    echo -e "${CLR_YELLOW}Configuring UEFI boot order on physical server...${CLR_RESET}"
-
-    # Check if we're in UEFI mode
-    if ! is_uefi_mode; then
-        echo -e "${CLR_YELLOW}Not in UEFI mode, skipping boot order configuration.${CLR_RESET}"
-        return 0
-    fi
-
-    # Install efibootmgr if not available
-    if ! command -v efibootmgr &> /dev/null; then
-        echo -e "${CLR_YELLOW}Installing efibootmgr...${CLR_RESET}"
-        apt-get update -qq && apt-get install -y -qq efibootmgr
-    fi
-
-    # Find the EFI System Partition on the first NVMe drive
-    # Proxmox ZFS installer creates partition 2 as EFI System Partition
-    ESP_PARTITION="${NVME_DRIVE_1}p2"
-    if [ ! -b "$ESP_PARTITION" ]; then
-        # Try without 'p' for non-NVMe drives
-        ESP_PARTITION="${NVME_DRIVE_1}2"
-    fi
-
-    if [ ! -b "$ESP_PARTITION" ]; then
-        echo -e "${CLR_RED}Could not find EFI System Partition. Boot order not configured.${CLR_RESET}"
-        return 1
-    fi
-
-    echo -e "${CLR_YELLOW}Found EFI partition: ${ESP_PARTITION}${CLR_RESET}"
-
-    # Create mount point and mount ESP
-    MOUNT_POINT="/tmp/esp_mount"
-    mkdir -p "$MOUNT_POINT"
-    mount "$ESP_PARTITION" "$MOUNT_POINT"
-
-    # Find the bootloader - Proxmox uses systemd-boot
-    BOOTLOADER=""
-    if [ -f "$MOUNT_POINT/EFI/systemd/systemd-bootx64.efi" ]; then
-        BOOTLOADER="\\EFI\\systemd\\systemd-bootx64.efi"
-        BOOTLOADER_PATH="/EFI/systemd/systemd-bootx64.efi"
-    elif [ -f "$MOUNT_POINT/EFI/BOOT/BOOTX64.EFI" ]; then
-        BOOTLOADER="\\EFI\\BOOT\\BOOTX64.EFI"
-        BOOTLOADER_PATH="/EFI/BOOT/BOOTX64.EFI"
-    elif [ -f "$MOUNT_POINT/EFI/proxmox/shimx64.efi" ]; then
-        BOOTLOADER="\\EFI\\proxmox\\shimx64.efi"
-        BOOTLOADER_PATH="/EFI/proxmox/shimx64.efi"
-    fi
-
-    # List what's in EFI directory for debugging
-    echo -e "${CLR_YELLOW}EFI directory contents:${CLR_RESET}"
-    ls -la "$MOUNT_POINT/EFI/" 2>/dev/null || true
-
-    umount "$MOUNT_POINT"
-    rmdir "$MOUNT_POINT"
-
-    if [ -z "$BOOTLOADER" ]; then
-        echo -e "${CLR_RED}Could not find bootloader in ESP. Boot order not configured.${CLR_RESET}"
-        return 1
-    fi
-
-    echo -e "${CLR_YELLOW}Found bootloader: ${BOOTLOADER_PATH}${CLR_RESET}"
-
-    # Get the disk identifier for efibootmgr (e.g., /dev/nvme0n1)
-    DISK="$NVME_DRIVE_1"
-    PART_NUM=2  # EFI partition is typically partition 2
-
-    # Check current boot entries
-    echo -e "${CLR_YELLOW}Current UEFI boot entries:${CLR_RESET}"
-    efibootmgr -v 2>/dev/null || efibootmgr
-
-    # Remove any existing "Proxmox" boot entries to avoid duplicates
-    for entry in $(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}"); do
-        efibootmgr -b "$entry" -B 2>/dev/null || true
-    done
-
-    # Create new boot entry for Proxmox
-    echo -e "${CLR_YELLOW}Creating Proxmox boot entry...${CLR_RESET}"
-    efibootmgr -c -d "$DISK" -p "$PART_NUM" -L "Proxmox VE" -l "$BOOTLOADER"
-
-    # Get the new Proxmox boot entry number
-    PROXMOX_ENTRY=$(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | head -1)
-
-    if [ -n "$PROXMOX_ENTRY" ]; then
-        # Get all other entries (PXE, Shell, etc.)
-        OTHER_ENTRIES=$(efibootmgr | grep -E "Boot[0-9A-F]{4}" | grep -v -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
-
-        # Set boot order: Proxmox first, then others
-        if [ -n "$OTHER_ENTRIES" ]; then
-            NEW_ORDER="${PROXMOX_ENTRY},${OTHER_ENTRIES}"
-        else
-            NEW_ORDER="${PROXMOX_ENTRY}"
-        fi
-
-        echo -e "${CLR_YELLOW}Setting boot order: ${NEW_ORDER}${CLR_RESET}"
-        efibootmgr -o "$NEW_ORDER"
-
-        echo -e "${CLR_GREEN}UEFI boot order configured: Proxmox first${CLR_RESET}"
-    else
-        echo -e "${CLR_RED}Failed to create Proxmox boot entry.${CLR_RESET}"
-        return 1
-    fi
-
-    # Show final boot configuration
-    echo -e "${CLR_YELLOW}Final UEFI boot configuration:${CLR_RESET}"
-    efibootmgr
 }
 
 # Function to reboot into the main OS
@@ -909,7 +978,12 @@ reboot_to_main_os() {
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo "  ✓ Subscription notice removed"
-    echo "  ✓ UEFI boot order: disk first, PXE second"
+    echo ""
+    echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
+    echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
+    echo "  ✓ VM image tools: libguestfs-tools"
+    echo "  ✓ ZFS ARC memory limits configured"
+    echo "  ✓ nf_conntrack optimized for high connection counts"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
@@ -945,9 +1019,9 @@ reboot_to_main_os() {
     fi
 }
 
-
-
+# =============================================================================
 # Main execution flow
+# =============================================================================
 detect_nvme_drives
 get_system_inputs
 prepare_packages
@@ -956,9 +1030,7 @@ make_answer_toml
 make_autoinstall_iso
 install_proxmox
 
-echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
-
-# Boot the installed Proxmox with port forwarding
+# Boot and configure via SSH
 boot_proxmox_with_port_forwarding || {
     echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
     exit 1
@@ -966,9 +1038,6 @@ boot_proxmox_with_port_forwarding || {
 
 # Configure Proxmox via SSH
 configure_proxmox_via_ssh
-
-# Configure UEFI boot order from Rescue System (physical UEFI firmware)
-configure_uefi_boot_order
 
 # Reboot to the main OS
 reboot_to_main_os
