@@ -46,6 +46,16 @@ NON_INTERACTIVE=false
 CONFIG_FILE=""
 SAVE_CONFIG=""
 
+# Feature flags (defaults)
+HIDE_CEPH="${HIDE_CEPH:-yes}"
+INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN:-no}"
+INSTALL_FIREWALL="${INSTALL_FIREWALL:-no}"
+INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT:-no}"
+INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES:-yes}"
+INSTALL_MOTD="${INSTALL_MOTD:-yes}"
+ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH:-no}"
+OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD:-yes}"
+
 # =============================================================================
 # Command line argument parsing
 # =============================================================================
@@ -153,6 +163,17 @@ TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
 
 # ZFS RAID mode (single, raid0, raid1)
 ZFS_RAID="${ZFS_RAID}"
+
+# Optional features
+HIDE_CEPH="${HIDE_CEPH}"
+INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN}"
+INSTALL_FIREWALL="${INSTALL_FIREWALL}"
+INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT}"
+INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES}"
+INSTALL_MOTD="${INSTALL_MOTD}"
+ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH}"
+OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD}"
+LETSENCRYPT_DOMAIN="${LETSENCRYPT_DOMAIN}"
 EOF
     chmod 600 "$file"
     echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"
@@ -1172,6 +1193,25 @@ get_inputs_non_interactive() {
     else
         print_success "Tailscale: skipped"
     fi
+
+    # Optional features (use defaults if not set)
+    HIDE_CEPH="${HIDE_CEPH:-yes}"
+    INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN:-no}"
+    INSTALL_FIREWALL="${INSTALL_FIREWALL:-no}"
+    INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT:-no}"
+    INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES:-yes}"
+    INSTALL_MOTD="${INSTALL_MOTD:-yes}"
+    ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH:-no}"
+    OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD:-yes}"
+
+    print_success "Hide Ceph UI: ${HIDE_CEPH}"
+    print_success "Fail2ban: ${INSTALL_FAIL2BAN}"
+    print_success "Firewall: ${INSTALL_FIREWALL}"
+    print_success "Let's Encrypt: ${INSTALL_LETSENCRYPT}"
+    print_success "Unattended upgrades: ${INSTALL_UNATTENDED_UPGRADES}"
+    print_success "Custom MOTD: ${INSTALL_MOTD}"
+    print_success "PCI Passthrough: ${ENABLE_PCI_PASSTHROUGH}"
+    print_success "Journald optimization: ${OPTIMIZE_JOURNALD}"
 }
 
 # =============================================================================
@@ -1460,6 +1500,139 @@ get_inputs_interactive() {
             print_success "Tailscale installation skipped"
         fi
     fi
+
+    # --- Advanced Options ---
+    # Check if any advanced option is already set from env
+    local advanced_from_env=false
+    if [[ -n "$HIDE_CEPH" || -n "$INSTALL_FAIL2BAN" || -n "$INSTALL_FIREWALL" || \
+          -n "$INSTALL_LETSENCRYPT" || -n "$INSTALL_UNATTENDED_UPGRADES" || \
+          -n "$INSTALL_MOTD" || -n "$ENABLE_PCI_PASSTHROUGH" || -n "$OPTIMIZE_JOURNALD" ]]; then
+        advanced_from_env=true
+    fi
+
+    if [[ "$advanced_from_env" == true ]]; then
+        # Use values from environment/config, apply defaults
+        HIDE_CEPH="${HIDE_CEPH:-yes}"
+        INSTALL_FAIL2BAN="${INSTALL_FAIL2BAN:-no}"
+        INSTALL_FIREWALL="${INSTALL_FIREWALL:-no}"
+        INSTALL_LETSENCRYPT="${INSTALL_LETSENCRYPT:-no}"
+        INSTALL_UNATTENDED_UPGRADES="${INSTALL_UNATTENDED_UPGRADES:-yes}"
+        INSTALL_MOTD="${INSTALL_MOTD:-yes}"
+        ENABLE_PCI_PASSTHROUGH="${ENABLE_PCI_PASSTHROUGH:-no}"
+        OPTIMIZE_JOURNALD="${OPTIMIZE_JOURNALD:-yes}"
+
+        print_success "Advanced options loaded from config/env"
+        [[ "$HIDE_CEPH" == "yes" ]] && print_success "  Hide Ceph UI: yes"
+        [[ "$INSTALL_FAIL2BAN" == "yes" ]] && print_success "  Fail2ban: yes"
+        [[ "$INSTALL_FIREWALL" == "yes" ]] && print_success "  Firewall: yes"
+        [[ "$INSTALL_LETSENCRYPT" == "yes" ]] && print_success "  Let's Encrypt: yes"
+        [[ "$INSTALL_UNATTENDED_UPGRADES" == "yes" ]] && print_success "  Unattended upgrades: yes"
+        [[ "$INSTALL_MOTD" == "yes" ]] && print_success "  Custom MOTD: yes"
+        [[ "$ENABLE_PCI_PASSTHROUGH" == "yes" ]] && print_success "  PCI Passthrough: yes"
+        [[ "$OPTIMIZE_JOURNALD" == "yes" ]] && print_success "  Journald optimization: yes"
+    else
+        # Set defaults first
+        HIDE_CEPH="yes"
+        INSTALL_FAIL2BAN="no"
+        INSTALL_FIREWALL="no"
+        INSTALL_LETSENCRYPT="no"
+        INSTALL_UNATTENDED_UPGRADES="yes"
+        INSTALL_MOTD="yes"
+        ENABLE_PCI_PASSTHROUGH="no"
+        OPTIMIZE_JOURNALD="yes"
+
+        local adv_header="Configure additional features for your Proxmox installation."$'\n'
+        adv_header+="Defaults are optimized for most use cases."
+
+        interactive_menu \
+            "Advanced Options (↑/↓ select, Enter confirm)" \
+            "$adv_header" \
+            "Use defaults|Recommended settings for most users" \
+            "Customize|Configure each option individually"
+
+        if [[ $MENU_SELECTED -eq 1 ]]; then
+            # --- Hide Ceph UI ---
+            interactive_menu \
+                "Hide Ceph UI (↑/↓ select, Enter confirm)" \
+                "Ceph is distributed storage, not needed for single-server" \
+                "Yes - Hide Ceph|Clean UI without Ceph menu items" \
+                "No - Show Ceph|Keep Ceph menu visible"
+            [[ $MENU_SELECTED -eq 0 ]] && HIDE_CEPH="yes" || HIDE_CEPH="no"
+            print_success "Hide Ceph UI: ${HIDE_CEPH}"
+
+            # --- Fail2ban ---
+            interactive_menu \
+                "Fail2ban - Brute-force Protection (↑/↓ select, Enter confirm)" \
+                "Blocks IPs after failed login attempts" \
+                "No - Skip|Install manually later if needed" \
+                "Yes - Install|Protect SSH and PVE Web from attacks"
+            [[ $MENU_SELECTED -eq 1 ]] && INSTALL_FAIL2BAN="yes" || INSTALL_FAIL2BAN="no"
+            print_success "Fail2ban: ${INSTALL_FAIL2BAN}"
+
+            # --- Firewall ---
+            interactive_menu \
+                "Basic Firewall (↑/↓ select, Enter confirm)" \
+                "iptables rules: allow SSH(22), PVE Web(8006), block rest" \
+                "No - Skip|No firewall rules (use PVE firewall instead)" \
+                "Yes - Enable|Basic host-level firewall protection"
+            [[ $MENU_SELECTED -eq 1 ]] && INSTALL_FIREWALL="yes" || INSTALL_FIREWALL="no"
+            print_success "Firewall: ${INSTALL_FIREWALL}"
+
+            # --- Let's Encrypt ---
+            interactive_menu \
+                "Let's Encrypt SSL Certificate (↑/↓ select, Enter confirm)" \
+                "Free HTTPS certificate for Proxmox Web UI" \
+                "No - Skip|Use self-signed certificate" \
+                "Yes - Install|Requires valid domain pointing to this server"
+            if [[ $MENU_SELECTED -eq 1 ]]; then
+                INSTALL_LETSENCRYPT="yes"
+                input_box "Let's Encrypt Domain" "Enter the domain for SSL certificate:" "Domain: " "${FQDN:-}"
+                LETSENCRYPT_DOMAIN="$INPUT_VALUE"
+                print_success "Let's Encrypt: yes (${LETSENCRYPT_DOMAIN})"
+            else
+                INSTALL_LETSENCRYPT="no"
+                print_success "Let's Encrypt: no"
+            fi
+
+            # --- Unattended Upgrades ---
+            interactive_menu \
+                "Unattended Security Upgrades (↑/↓ select, Enter confirm)" \
+                "Automatically install security updates" \
+                "Yes - Enable|Recommended for security" \
+                "No - Disable|Manual updates only"
+            [[ $MENU_SELECTED -eq 0 ]] && INSTALL_UNATTENDED_UPGRADES="yes" || INSTALL_UNATTENDED_UPGRADES="no"
+            print_success "Unattended upgrades: ${INSTALL_UNATTENDED_UPGRADES}"
+
+            # --- MOTD ---
+            interactive_menu \
+                "Custom MOTD (Message of the Day) (↑/↓ select, Enter confirm)" \
+                "Shows system info on SSH login" \
+                "Yes - Enable|Show CPU, RAM, disk usage on login" \
+                "No - Disable|Keep default MOTD"
+            [[ $MENU_SELECTED -eq 0 ]] && INSTALL_MOTD="yes" || INSTALL_MOTD="no"
+            print_success "Custom MOTD: ${INSTALL_MOTD}"
+
+            # --- PCI Passthrough ---
+            interactive_menu \
+                "PCI Passthrough Preparation (↑/↓ select, Enter confirm)" \
+                "Enable IOMMU for GPU/NIC passthrough to VMs" \
+                "No - Skip|Enable manually if needed later" \
+                "Yes - Enable|Configure GRUB for IOMMU support"
+            [[ $MENU_SELECTED -eq 1 ]] && ENABLE_PCI_PASSTHROUGH="yes" || ENABLE_PCI_PASSTHROUGH="no"
+            print_success "PCI Passthrough: ${ENABLE_PCI_PASSTHROUGH}"
+
+            # --- Journald Optimization ---
+            interactive_menu \
+                "Journald Log Optimization (↑/↓ select, Enter confirm)" \
+                "Limit system logs to prevent disk fill" \
+                "Yes - Enable|Limit logs to 1GB max" \
+                "No - Disable|Keep default journald settings"
+            [[ $MENU_SELECTED -eq 0 ]] && OPTIMIZE_JOURNALD="yes" || OPTIMIZE_JOURNALD="no"
+            print_success "Journald optimization: ${OPTIMIZE_JOURNALD}"
+        else
+            print_success "Using default advanced options"
+        fi
+    fi
 }
 
 # =============================================================================
@@ -1720,9 +1893,9 @@ boot_proxmox_with_port_forwarding() {
     wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
 }
 
-# --- 10-configure.sh ---
+# --- 10-configure-base.sh ---
 # =============================================================================
-# Post-installation configuration
+# Base system configuration
 # =============================================================================
 
 make_template_files() {
@@ -1763,9 +1936,9 @@ make_template_files() {
     print_success "Template files modified"
 }
 
-# Configure the installed Proxmox via SSH
-configure_proxmox_via_ssh() {
-    print_info "Starting post-installation configuration via SSH..."
+# Configure base system via SSH
+configure_base_system() {
+    print_info "Starting base system configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
@@ -1853,6 +2026,89 @@ REPOEOF
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
+    # Install and configure zsh as default shell
+    print_info "Installing and configuring zsh..."
+    remote_exec_script << 'ZSHEOF'
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting
+
+        # Create minimal .zshrc for root
+        cat > /root/.zshrc << 'ZSHRC'
+# Proxmox ZSH Configuration
+
+# History settings
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt SHARE_HISTORY
+setopt APPEND_HISTORY
+
+# Key bindings
+bindkey -e
+bindkey '^[[A' history-search-backward
+bindkey '^[[B' history-search-forward
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+bindkey '^[[3~' delete-char
+
+# Completion
+autoload -Uz compinit && compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+
+# Colors
+autoload -Uz colors && colors
+
+# Prompt with git branch support
+autoload -Uz vcs_info
+precmd() { vcs_info }
+zstyle ':vcs_info:git:*' formats ' (%b)'
+setopt PROMPT_SUBST
+PROMPT='%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '
+
+# Aliases
+alias ll='ls -lah --color=auto'
+alias la='ls -A --color=auto'
+alias l='ls -CF --color=auto'
+alias grep='grep --color=auto'
+alias df='df -h'
+alias du='du -h'
+alias free='free -h'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Proxmox aliases
+alias qml='qm list'
+alias pctl='pct list'
+alias pvesh='pvesh'
+alias zpl='zpool list'
+alias zst='zpool status'
+
+# Use bat instead of cat if available
+command -v bat &>/dev/null && alias cat='bat --paging=never'
+
+# Use btop instead of top if available
+command -v btop &>/dev/null && alias top='btop'
+
+# Load plugins if available
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
+    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Auto-suggestions color (gray)
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+ZSHRC
+
+        # Set zsh as default shell for root
+        chsh -s /bin/zsh root
+
+        echo "ZSH installed and configured as default shell"
+ZSHEOF
+    print_success "ZSH configured as default shell"
+
     # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
         export DEBIAN_FRONTEND=noninteractive
@@ -1862,23 +2118,6 @@ REPOEOF
         locale-gen
         update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
     '
-
-    # Configure nf_conntrack
-    print_info "Configuring nf_conntrack..."
-    remote_exec_script << 'CONNTRACKEOF'
-        # Add nf_conntrack module to load at boot
-        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
-            echo "nf_conntrack" >> /etc/modules
-        fi
-
-        # Configure connection tracking limits
-        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
-            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
-            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
-        fi
-
-        echo "nf_conntrack configured"
-CONNTRACKEOF
 
     # Configure CPU governor
     remote_exec_with_progress "Configuring CPU governor" '
@@ -1903,38 +2142,66 @@ CONNTRACKEOF
         fi
 SUBEOF
 
-    # Hide Ceph from UI (not needed for single-server setup)
-    print_info "Hiding Ceph from UI..."
-    remote_exec_script << 'CEPHEOF'
-        # Create custom CSS to hide Ceph-related UI elements
-        CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-        cat > "$CUSTOM_CSS" << 'CSS'
-/* Hide Ceph menu items - not needed for single server */
-#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
-.x-treelist-item-text:has-text("Ceph") { display: none !important; }
-tr[data-qtip*="Ceph"] { display: none !important; }
-CSS
+    print_success "Base system configuration complete"
+}
 
-        # Add custom CSS to index template if not already added
-        INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-        if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-            sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-            echo "Custom CSS added to hide Ceph"
+# --- 11-configure-network.sh ---
+# =============================================================================
+# Network configuration
+# =============================================================================
+
+configure_network() {
+    print_info "Starting network configuration..."
+
+    # ==========================================================================
+    # nf_conntrack configuration
+    # ==========================================================================
+    print_info "Configuring nf_conntrack..."
+    remote_exec_script << 'CONNTRACKEOF'
+        # Add nf_conntrack module to load at boot
+        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
+            echo "nf_conntrack" >> /etc/modules
         fi
 
-        # Alternative: patch JavaScript to hide Ceph panel completely
-        PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-        if [ -f "$PVE_MANAGER_JS" ]; then
-            if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
-            fi
+        # Configure connection tracking limits
+        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
+            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
+            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
 
-        systemctl restart pveproxy.service
-        echo "Ceph UI elements hidden"
-CEPHEOF
+        echo "nf_conntrack configured"
+CONNTRACKEOF
 
-    # Install Tailscale if requested
+    # ==========================================================================
+    # NTP Synchronization (always enabled)
+    # ==========================================================================
+    print_info "Configuring NTP time synchronization..."
+    remote_exec_script << 'NTPEOF'
+        # Enable and configure systemd-timesyncd
+        apt-get install -yqq systemd-timesyncd 2>/dev/null || true
+
+        # Configure NTP servers
+        mkdir -p /etc/systemd/timesyncd.conf.d
+        cat > /etc/systemd/timesyncd.conf.d/local.conf << 'CONF'
+[Time]
+NTP=0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org 3.pool.ntp.org
+FallbackNTP=ntp.ubuntu.com time.cloudflare.com
+CONF
+
+        # Enable and start timesyncd
+        systemctl enable systemd-timesyncd
+        systemctl restart systemd-timesyncd
+
+        # Set hardware clock from system time
+        hwclock --systohc 2>/dev/null || true
+
+        echo "NTP synchronization configured"
+NTPEOF
+    print_success "NTP time synchronization configured"
+
+    # ==========================================================================
+    # Tailscale VPN (optional)
+    # ==========================================================================
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         remote_exec_with_progress "Installing Tailscale VPN" '
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
@@ -1980,6 +2247,476 @@ CEPHEOF
         fi
     fi
 
+    # ==========================================================================
+    # Basic Firewall (optional, default: no)
+    # ==========================================================================
+    if [[ "$INSTALL_FIREWALL" == "yes" ]]; then
+        print_info "Configuring basic firewall rules..."
+        remote_exec_script << 'FWEOF'
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -yqq iptables-persistent netfilter-persistent
+
+            # Flush existing rules
+            iptables -F
+            iptables -X
+            iptables -t nat -F
+            iptables -t nat -X
+
+            # Default policies
+            iptables -P INPUT DROP
+            iptables -P FORWARD ACCEPT
+            iptables -P OUTPUT ACCEPT
+
+            # Allow loopback
+            iptables -A INPUT -i lo -j ACCEPT
+
+            # Allow established connections
+            iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+            # Allow ICMP (ping)
+            iptables -A INPUT -p icmp -j ACCEPT
+
+            # Allow SSH (port 22)
+            iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+            # Allow Proxmox Web UI (port 8006)
+            iptables -A INPUT -p tcp --dport 8006 -j ACCEPT
+
+            # Allow VNC console (ports 5900-5999)
+            iptables -A INPUT -p tcp --dport 5900:5999 -j ACCEPT
+
+            # Allow Spice console (port 3128)
+            iptables -A INPUT -p tcp --dport 3128 -j ACCEPT
+
+            # Allow Proxmox cluster communication (if needed)
+            iptables -A INPUT -p tcp --dport 111 -j ACCEPT
+            iptables -A INPUT -p udp --dport 111 -j ACCEPT
+            iptables -A INPUT -p tcp --dport 85 -j ACCEPT
+
+            # Allow internal bridge traffic
+            iptables -A INPUT -i vmbr+ -j ACCEPT
+
+            # Log dropped packets (optional, can be noisy)
+            # iptables -A INPUT -j LOG --log-prefix "IPTables-Dropped: "
+
+            # Save rules
+            netfilter-persistent save
+
+            # IPv6 rules (similar)
+            ip6tables -F
+            ip6tables -P INPUT DROP
+            ip6tables -P FORWARD ACCEPT
+            ip6tables -P OUTPUT ACCEPT
+            ip6tables -A INPUT -i lo -j ACCEPT
+            ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+            ip6tables -A INPUT -p ipv6-icmp -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 8006 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 5900:5999 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 3128 -j ACCEPT
+            ip6tables -A INPUT -i vmbr+ -j ACCEPT
+
+            netfilter-persistent save
+
+            echo "Firewall configured: SSH(22), PVE Web(8006), VNC, Spice allowed"
+FWEOF
+        print_success "Basic firewall configured"
+    fi
+
+    print_success "Network configuration complete"
+}
+
+# --- 12-configure-features.sh ---
+# =============================================================================
+# Optional features and finalization
+# =============================================================================
+
+configure_optional_features() {
+    print_info "Configuring optional features..."
+
+    # ==========================================================================
+    # Hide Ceph from UI (optional, default: yes)
+    # ==========================================================================
+    if [[ "$HIDE_CEPH" == "yes" ]]; then
+        print_info "Hiding Ceph from UI..."
+        remote_exec_script << 'CEPHEOF'
+            # Create custom CSS to hide Ceph-related UI elements
+            CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
+            cat > "$CUSTOM_CSS" << 'CSS'
+/* Hide Ceph menu items - not needed for single server */
+#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
+.x-treelist-item-text:has-text("Ceph") { display: none !important; }
+tr[data-qtip*="Ceph"] { display: none !important; }
+CSS
+
+            # Add custom CSS to index template if not already added
+            INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
+            if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
+                sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
+                echo "Custom CSS added to hide Ceph"
+            fi
+
+            # Alternative: patch JavaScript to hide Ceph panel completely
+            PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
+            if [ -f "$PVE_MANAGER_JS" ]; then
+                if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
+                    sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
+                fi
+            fi
+
+            systemctl restart pveproxy.service
+            echo "Ceph UI elements hidden"
+CEPHEOF
+    else
+        print_info "Skipping Ceph UI hiding (disabled)"
+    fi
+
+    # ==========================================================================
+    # Journald Optimization (optional, default: yes)
+    # ==========================================================================
+    if [[ "$OPTIMIZE_JOURNALD" == "yes" ]]; then
+        print_info "Optimizing journald log settings..."
+        remote_exec_script << 'JOURNALDEOF'
+            mkdir -p /etc/systemd/journald.conf.d
+            cat > /etc/systemd/journald.conf.d/size-limit.conf << 'CONF'
+[Journal]
+# Limit journal size to prevent disk fill
+SystemMaxUse=1G
+SystemKeepFree=2G
+SystemMaxFileSize=100M
+MaxRetentionSec=1month
+MaxFileSec=1week
+Compress=yes
+CONF
+
+            # Restart journald to apply changes
+            systemctl restart systemd-journald
+
+            # Clean up old logs
+            journalctl --vacuum-size=500M 2>/dev/null || true
+
+            echo "Journald optimized: max 1GB, 1 month retention"
+JOURNALDEOF
+        print_success "Journald optimization configured"
+    fi
+
+    # ==========================================================================
+    # Unattended Upgrades (optional, default: yes)
+    # ==========================================================================
+    if [[ "$INSTALL_UNATTENDED_UPGRADES" == "yes" ]]; then
+        remote_exec_with_progress "Configuring unattended security upgrades" '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -yqq unattended-upgrades apt-listchanges
+
+            # Enable unattended upgrades
+            cat > /etc/apt/apt.conf.d/20auto-upgrades << EOF
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+            # Configure what to upgrade
+            cat > /etc/apt/apt.conf.d/50unattended-upgrades << EOF
+Unattended-Upgrade::Allowed-Origins {
+    "\${distro_id}:\${distro_codename}";
+    "\${distro_id}:\${distro_codename}-security";
+    "\${distro_id}:\${distro_codename}-updates";
+    "Proxmox:bookworm";
+};
+Unattended-Upgrade::Package-Blacklist {
+    "proxmox-ve";
+    "pve-kernel-*";
+};
+Unattended-Upgrade::DevRelease "false";
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+
+            # Enable the service
+            systemctl enable unattended-upgrades
+            systemctl start unattended-upgrades
+
+            echo "Unattended upgrades configured (security + updates, kernel excluded)"
+        '
+    fi
+
+    # ==========================================================================
+    # Custom MOTD (optional, default: yes)
+    # ==========================================================================
+    if [[ "$INSTALL_MOTD" == "yes" ]]; then
+        print_info "Configuring custom MOTD..."
+        remote_exec_script << 'MOTDEOF'
+            # Disable default MOTD components
+            chmod -x /etc/update-motd.d/* 2>/dev/null || true
+
+            # Create custom MOTD script
+            cat > /etc/update-motd.d/00-proxmox-info << 'SCRIPT'
+#!/bin/bash
+# Proxmox System Information MOTD
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Get system info
+HOSTNAME=$(hostname)
+UPTIME=$(uptime -p | sed 's/up //')
+LOAD=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
+KERNEL=$(uname -r)
+
+# CPU info
+CPU_MODEL=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+CPU_CORES=$(nproc)
+CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}' | cut -d. -f1)
+
+# Memory info
+MEM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
+MEM_USED=$(free -h | awk '/^Mem:/ {print $3}')
+MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
+
+# ZFS info
+if command -v zpool &> /dev/null; then
+    ZFS_POOL=$(zpool list -H -o name 2>/dev/null | head -1)
+    if [ -n "$ZFS_POOL" ]; then
+        ZFS_SIZE=$(zpool list -H -o size "$ZFS_POOL" 2>/dev/null)
+        ZFS_USED=$(zpool list -H -o allocated "$ZFS_POOL" 2>/dev/null)
+        ZFS_FREE=$(zpool list -H -o free "$ZFS_POOL" 2>/dev/null)
+        ZFS_HEALTH=$(zpool list -H -o health "$ZFS_POOL" 2>/dev/null)
+    fi
+fi
+
+# VM/CT counts
+VMS=$(qm list 2>/dev/null | tail -n +2 | wc -l)
+CTS=$(pct list 2>/dev/null | tail -n +2 | wc -l)
+RUNNING_VMS=$(qm list 2>/dev/null | grep running | wc -l)
+RUNNING_CTS=$(pct list 2>/dev/null | grep running | wc -l)
+
+# Network info
+IP_ADDR=$(hostname -I | awk '{print $1}')
+
+echo ""
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║${NC}              ${BLUE}${BOLD}Proxmox VE - ${HOSTNAME}${NC}              ${CYAN}${BOLD}║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BOLD}System:${NC}"
+echo -e "  Kernel:    ${KERNEL}"
+echo -e "  Uptime:    ${UPTIME}"
+echo -e "  Load:      ${LOAD}"
+echo -e "  IP:        ${IP_ADDR}"
+echo ""
+echo -e "${BOLD}Resources:${NC}"
+if [ "$CPU_USAGE" -gt 80 ]; then
+    echo -e "  CPU:       ${RED}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+elif [ "$CPU_USAGE" -gt 50 ]; then
+    echo -e "  CPU:       ${YELLOW}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+else
+    echo -e "  CPU:       ${GREEN}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+fi
+
+if [ "$MEM_PERCENT" -gt 80 ]; then
+    echo -e "  Memory:    ${RED}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+elif [ "$MEM_PERCENT" -gt 50 ]; then
+    echo -e "  Memory:    ${YELLOW}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+else
+    echo -e "  Memory:    ${GREEN}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+fi
+
+if [ -n "$ZFS_POOL" ]; then
+    echo ""
+    echo -e "${BOLD}ZFS Pool (${ZFS_POOL}):${NC}"
+    if [ "$ZFS_HEALTH" = "ONLINE" ]; then
+        echo -e "  Health:    ${GREEN}${ZFS_HEALTH}${NC}"
+    else
+        echo -e "  Health:    ${RED}${ZFS_HEALTH}${NC}"
+    fi
+    echo -e "  Used:      ${ZFS_USED} / ${ZFS_SIZE} (Free: ${ZFS_FREE})"
+fi
+
+echo ""
+echo -e "${BOLD}Virtualization:${NC}"
+echo -e "  VMs:       ${VMS} total, ${GREEN}${RUNNING_VMS} running${NC}"
+echo -e "  CTs:       ${CTS} total, ${GREEN}${RUNNING_CTS} running${NC}"
+echo ""
+SCRIPT
+
+            chmod +x /etc/update-motd.d/00-proxmox-info
+
+            # Disable last login message
+            sed -i 's/^#*PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null || true
+
+            echo "Custom MOTD configured"
+MOTDEOF
+        print_success "Custom MOTD configured"
+    fi
+
+    # ==========================================================================
+    # Fail2ban (optional, default: no)
+    # ==========================================================================
+    if [[ "$INSTALL_FAIL2BAN" == "yes" ]]; then
+        remote_exec_with_progress "Installing and configuring Fail2ban" '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -yqq fail2ban
+
+            # Create Proxmox-specific jail configuration
+            cat > /etc/fail2ban/jail.d/proxmox.conf << EOF
+[DEFAULT]
+# Ban hosts for 1 hour
+bantime = 3600
+# Find failures within 10 minutes
+findtime = 600
+# Allow 5 retries before ban
+maxretry = 5
+# Ignore local networks
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 3600
+
+[proxmox]
+enabled = true
+port = https,http,8006
+filter = proxmox
+logpath = /var/log/daemon.log
+maxretry = 3
+bantime = 3600
+EOF
+
+            # Create Proxmox filter
+            cat > /etc/fail2ban/filter.d/proxmox.conf << EOF
+[Definition]
+failregex = pvedaemon\[.*authentication failure; rhost=<HOST> user=.* msg=.*
+ignoreregex =
+EOF
+
+            # Enable and start fail2ban
+            systemctl enable fail2ban
+            systemctl restart fail2ban
+
+            echo "Fail2ban configured with SSH and Proxmox jails"
+        '
+    fi
+
+    # ==========================================================================
+    # PCI Passthrough Preparation (optional, default: no)
+    # ==========================================================================
+    if [[ "$ENABLE_PCI_PASSTHROUGH" == "yes" ]]; then
+        print_info "Configuring PCI passthrough (IOMMU)..."
+        remote_exec_script << 'IOMMUEOF'
+            # Detect CPU vendor
+            if grep -q "GenuineIntel" /proc/cpuinfo; then
+                IOMMU_PARAM="intel_iommu=on"
+            elif grep -q "AuthenticAMD" /proc/cpuinfo; then
+                IOMMU_PARAM="amd_iommu=on"
+            else
+                echo "Unknown CPU vendor, using intel_iommu"
+                IOMMU_PARAM="intel_iommu=on"
+            fi
+
+            # Update GRUB configuration
+            GRUB_FILE="/etc/default/grub"
+            if [ -f "$GRUB_FILE" ]; then
+                # Backup original
+                cp "$GRUB_FILE" "${GRUB_FILE}.bak"
+
+                # Add IOMMU parameters if not present
+                if ! grep -q "iommu=on" "$GRUB_FILE"; then
+                    sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"${IOMMU_PARAM} iommu=pt /" "$GRUB_FILE"
+                fi
+
+                # Update GRUB
+                update-grub
+                echo "GRUB updated with IOMMU parameters"
+            fi
+
+            # Add VFIO modules
+            cat > /etc/modules-load.d/vfio.conf << 'MODULES'
+vfio
+vfio_iommu_type1
+vfio_pci
+vfio_virqfd
+MODULES
+
+            # Blacklist GPU drivers for passthrough (commented by default)
+            cat > /etc/modprobe.d/pci-passthrough.conf << 'BLACKLIST'
+# Uncomment to blacklist drivers for GPU passthrough
+# blacklist nouveau
+# blacklist nvidia
+# blacklist nvidiafb
+# blacklist radeon
+# blacklist amdgpu
+
+# VFIO options
+options vfio-pci ids=
+BLACKLIST
+
+            echo "PCI passthrough prepared. Reboot required to enable IOMMU."
+            echo "To passthrough a device:"
+            echo "1. Find device ID: lspci -nn"
+            echo "2. Add ID to /etc/modprobe.d/pci-passthrough.conf"
+            echo "3. Regenerate initramfs: update-initramfs -u -k all"
+IOMMUEOF
+        print_success "PCI passthrough prepared (reboot required)"
+    fi
+
+    # ==========================================================================
+    # Let's Encrypt Certificate (optional, default: no)
+    # ==========================================================================
+    if [[ "$INSTALL_LETSENCRYPT" == "yes" && -n "$LETSENCRYPT_DOMAIN" ]]; then
+        print_info "Configuring Let's Encrypt for ${LETSENCRYPT_DOMAIN}..."
+        remote_exec_script << LEEOF
+            export DEBIAN_FRONTEND=noninteractive
+
+            # Install pve-acme for Proxmox ACME integration
+            apt-get install -yqq pve-acme 2>/dev/null || true
+
+            # Register ACME account if not exists
+            if ! pvenode acme account list 2>/dev/null | grep -q "default"; then
+                pvenode acme account register default --contact "${EMAIL}" --directory https://acme-v02.api.letsencrypt.org/directory
+                echo "ACME account registered"
+            fi
+
+            # Configure domain for certificate
+            pvenode config set --acme "domains=${LETSENCRYPT_DOMAIN}"
+
+            # Order certificate
+            if pvenode acme cert order 2>/dev/null; then
+                echo "Let's Encrypt certificate obtained for ${LETSENCRYPT_DOMAIN}"
+
+                # Setup auto-renewal cron
+                if ! grep -q "pvenode acme cert renew" /etc/crontab 2>/dev/null; then
+                    echo "0 3 * * * root pvenode acme cert renew --force 2>/dev/null" >> /etc/crontab
+                    echo "Auto-renewal cron job added"
+                fi
+            else
+                echo "Warning: Could not obtain certificate. Ensure DNS points to this server."
+                echo "Run manually after reboot: pvenode acme cert order"
+            fi
+LEEOF
+        print_success "Let's Encrypt configured for ${LETSENCRYPT_DOMAIN}"
+    fi
+
+    print_success "Optional features configuration complete"
+}
+
+# =============================================================================
+# Finalize configuration (SSH hardening and shutdown)
+# =============================================================================
+
+finalize_configuration() {
     # Deploy SSH hardening LAST (after all other operations)
     print_info "Deploying SSH hardening..."
 
@@ -1998,6 +2735,17 @@ CEPHEOF
     print_info "Waiting for QEMU process to exit..."
     wait $QEMU_PID || true
     print_success "QEMU process exited"
+}
+
+# =============================================================================
+# Main configuration function (calls all stages)
+# =============================================================================
+
+configure_proxmox_via_ssh() {
+    configure_base_system
+    configure_network
+    configure_optional_features
+    finalize_configuration
 }
 
 # --- 99-main.sh ---
