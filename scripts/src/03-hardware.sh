@@ -104,7 +104,6 @@ show_system_status() {
     fi
 
     # Display with boxes and colorize
-    echo ""
     {
         echo "SYSTEM INFORMATION"
         echo "$sys_rows" | column -t -s '|'
