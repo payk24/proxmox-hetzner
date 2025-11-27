@@ -213,9 +213,9 @@ if [[ "$NON_INTERACTIVE" == true ]]; then
 fi
 echo ""
 
-# --- 01-helpers.sh ---
+# --- 01-display.sh ---
 # =============================================================================
-# Helper functions
+# Display utilities
 # =============================================================================
 
 # Display a boxed section with title using 'boxes'
@@ -281,6 +281,31 @@ colorize_status() {
         -e "s/\[ERROR\]/${red}[ERROR]${reset}/g"
 }
 
+# Print success message with checkmark
+print_success() {
+    echo -e "${CLR_GREEN}✓${CLR_RESET} $1"
+}
+
+# Print error message with cross
+print_error() {
+    echo -e "${CLR_RED}✗${CLR_RESET} $1"
+}
+
+# Print warning message
+print_warning() {
+    echo -e "${CLR_YELLOW}⚠${CLR_RESET} $1"
+}
+
+# Print info message
+print_info() {
+    echo -e "${CLR_CYAN}ℹ${CLR_RESET} $1"
+}
+
+# --- 02-utils.sh ---
+# =============================================================================
+# General utilities
+# =============================================================================
+
 # Download files with retry
 download_file() {
     local output_file="$1"
@@ -293,16 +318,16 @@ download_file() {
             if [ -s "$output_file" ]; then
                 return 0
             else
-                echo -e "${CLR_RED}Downloaded file is empty: $output_file${CLR_RESET}"
+                print_error "Downloaded file is empty: $output_file"
             fi
         else
-            echo -e "${CLR_YELLOW}Download failed (attempt $((retry_count + 1))/$max_retries): $url${CLR_RESET}"
+            print_warning "Download failed (attempt $((retry_count + 1))/$max_retries): $url"
         fi
         retry_count=$((retry_count + 1))
         [ $retry_count -lt $max_retries ] && sleep 2
     done
 
-    echo -e "${CLR_RED}Failed to download $url after $max_retries attempts. Exiting.${CLR_RESET}"
+    print_error "Failed to download $url after $max_retries attempts. Exiting."
     exit 1
 }
 
@@ -336,7 +361,100 @@ read_password() {
     echo "$password"
 }
 
-# SSH helper functions to reduce duplication
+# Prompt with validation loop
+prompt_validated() {
+    local prompt="$1"
+    local default="$2"
+    local validator="$3"
+    local error_msg="$4"
+    local result=""
+
+    while true; do
+        read -e -p "$prompt" -i "$default" result
+        if $validator "$result"; then
+            echo "$result"
+            return 0
+        fi
+        print_error "$error_msg"
+    done
+}
+
+# =============================================================================
+# Progress indicators
+# =============================================================================
+
+# Spinner characters for progress display
+SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+# Progress indicator with spinner and elapsed time
+show_progress() {
+    local pid=$1
+    local message="${2:-Processing}"
+    local start_time=$(date +%s)
+    local i=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep 0.2
+    done
+
+    local total=$(($(date +%s) - start_time))
+    local mins=$((total / 60))
+    local secs=$((total % 60))
+    printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+}
+
+# Wait for condition with progress
+wait_with_progress() {
+    local message="$1"
+    local timeout="$2"
+    local check_cmd="$3"
+    local interval="${4:-5}"
+    local start_time=$(date +%s)
+    local i=0
+
+    while true; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+
+        if eval "$check_cmd" 2>/dev/null; then
+            printf "\r${CLR_GREEN}✓ %s [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 0
+        fi
+
+        if [ $elapsed -ge $timeout ]; then
+            printf "\r${CLR_RED}✗ %s timed out [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 1
+        fi
+
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep "$interval"
+    done
+}
+
+# Format time duration
+format_duration() {
+    local seconds="$1"
+    local hours=$((seconds / 3600))
+    local minutes=$(((seconds % 3600) / 60))
+    local secs=$((seconds % 60))
+
+    if [[ $hours -gt 0 ]]; then
+        echo "${hours}h ${minutes}m ${secs}s"
+    else
+        echo "${minutes}m ${secs}s"
+    fi
+}
+
+# --- 03-ssh.sh ---
+# =============================================================================
+# SSH helper functions
+# =============================================================================
+
 SSH_OPTS="-o StrictHostKeyChecking=no"
 SSH_PORT="5555"
 
@@ -366,45 +484,9 @@ remote_copy() {
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst"
 }
 
-# Prompt with validation loop
-prompt_validated() {
-    local prompt="$1"
-    local default="$2"
-    local validator="$3"
-    local error_msg="$4"
-    local result=""
-
-    while true; do
-        read -e -p "$prompt" -i "$default" result
-        if $validator "$result"; then
-            echo "$result"
-            return 0
-        fi
-        echo -e "${CLR_RED}${error_msg}${CLR_RESET}"
-    done
-}
-
-# Progress indicator with spinner and elapsed time
-show_progress() {
-    local pid=$1
-    local message="${2:-Processing}"
-    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local start_time=$(date +%s)
-    local i=0
-
-    while kill -0 "$pid" 2>/dev/null; do
-        local elapsed=$(($(date +%s) - start_time))
-        local mins=$((elapsed / 60))
-        local secs=$((elapsed % 60))
-        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
-        sleep 0.2
-    done
-
-    local total=$(($(date +%s) - start_time))
-    local mins=$((total / 60))
-    local secs=$((total % 60))
-    printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
-}
+# =============================================================================
+# SSH key utilities
+# =============================================================================
 
 # Parse SSH public key into components
 # Sets: SSH_KEY_TYPE, SSH_KEY_DATA, SSH_KEY_COMMENT, SSH_KEY_SHORT
@@ -442,42 +524,21 @@ validate_ssh_key() {
     [[ "$key" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]
 }
 
-# Wait for condition with progress
-wait_with_progress() {
-    local message="$1"
-    local timeout="$2"
-    local check_cmd="$3"
-    local interval="${4:-5}"
-    local start_time=$(date +%s)
-    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
-
-    while true; do
-        local elapsed=$(($(date +%s) - start_time))
-        local mins=$((elapsed / 60))
-        local secs=$((elapsed % 60))
-
-        if eval "$check_cmd" 2>/dev/null; then
-            printf "\r${CLR_GREEN}✓ %s [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
-            return 0
-        fi
-
-        if [ $elapsed -ge $timeout ]; then
-            printf "\r${CLR_RED}✗ %s timed out [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
-            return 1
-        fi
-
-        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
-        sleep "$interval"
-    done
+# Get SSH key from rescue system authorized_keys
+get_rescue_ssh_key() {
+    if [[ -f /root/.ssh/authorized_keys ]]; then
+        grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1
+    fi
 }
 
+# --- 04-menu.sh ---
 # =============================================================================
 # Interactive menu selection
 # =============================================================================
 # Usage: interactive_menu "Title" "header_content" "label1|desc1" "label2|desc2" ...
 # Sets: MENU_SELECTED (0-based index of selected option)
 # Fixed width: 70 characters for consistent appearance
+
 MENU_BOX_WIDTH=70
 
 interactive_menu() {
@@ -594,110 +655,36 @@ interactive_menu() {
     MENU_SELECTED=$selected
 }
 
-# --- 02-validation.sh ---
-# =============================================================================
-# System info collection with progress
-# =============================================================================
+# Display an input box and prompt for value
+# Usage: input_box "title" "content" "prompt" "default" -> result in INPUT_VALUE
+input_box() {
+    local title="$1"
+    local content="$2"
+    local prompt="$3"
+    local default="$4"
 
-collect_system_info() {
-    local errors=0
-    local checks=6
-    local current=0
-    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
+    local box_lines
+    box_lines=$({
+        echo "$title"
+        echo "$content"
+    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
 
-    # Progress update helper
-    update_progress() {
-        current=$((current + 1))
-        local pct=$((current * 100 / checks))
-        local filled=$((pct / 5))
-        local empty=$((20 - filled))
-        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} Checking system... [${CLR_GREEN}"
-        printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
-        printf "${CLR_RESET}${CLR_BLUE}"
-        printf '░%.0s' $(seq 1 $empty 2>/dev/null) 2>/dev/null || true
-        printf "${CLR_RESET}${CLR_YELLOW}] %3d%%${CLR_RESET}" "$pct"
-    }
+    {
+        echo "$title"
+        echo "$content"
+    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
 
-    # Check if running as root
-    update_progress
-    if [[ $EUID -ne 0 ]]; then
-        PREFLIGHT_ROOT="✗ Not root"
-        PREFLIGHT_ROOT_CLR="${CLR_RED}"
-        errors=$((errors + 1))
-    else
-        PREFLIGHT_ROOT="✓ Running as root"
-        PREFLIGHT_ROOT_CLR="${CLR_GREEN}"
-    fi
-    sleep 0.1
+    read -e -p "$prompt" -i "$default" INPUT_VALUE
 
-    # Check internet connectivity
-    update_progress
-    if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
-        PREFLIGHT_NET="✓ Available"
-        PREFLIGHT_NET_CLR="${CLR_GREEN}"
-    else
-        PREFLIGHT_NET="✗ No connection"
-        PREFLIGHT_NET_CLR="${CLR_RED}"
-        errors=$((errors + 1))
-    fi
-
-    # Check available disk space (need at least 5GB in /root)
-    update_progress
-    local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
-    if [[ $free_space_mb -ge 5000 ]]; then
-        PREFLIGHT_DISK="✓ ${free_space_mb} MB"
-        PREFLIGHT_DISK_CLR="${CLR_GREEN}"
-    else
-        PREFLIGHT_DISK="✗ ${free_space_mb} MB (need 5GB+)"
-        PREFLIGHT_DISK_CLR="${CLR_RED}"
-        errors=$((errors + 1))
-    fi
-    sleep 0.1
-
-    # Check RAM (need at least 4GB)
-    update_progress
-    local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-    if [[ $total_ram_mb -ge 4000 ]]; then
-        PREFLIGHT_RAM="✓ ${total_ram_mb} MB"
-        PREFLIGHT_RAM_CLR="${CLR_GREEN}"
-    else
-        PREFLIGHT_RAM="✗ ${total_ram_mb} MB (need 4GB+)"
-        PREFLIGHT_RAM_CLR="${CLR_RED}"
-        errors=$((errors + 1))
-    fi
-    sleep 0.1
-
-    # Check CPU cores
-    update_progress
-    local cpu_cores=$(nproc)
-    if [[ $cpu_cores -ge 2 ]]; then
-        PREFLIGHT_CPU="✓ ${cpu_cores} cores"
-        PREFLIGHT_CPU_CLR="${CLR_GREEN}"
-    else
-        PREFLIGHT_CPU="⚠ ${cpu_cores} core(s)"
-        PREFLIGHT_CPU_CLR="${CLR_YELLOW}"
-    fi
-    sleep 0.1
-
-    # Check if KVM is available
-    update_progress
-    if [[ -e /dev/kvm ]]; then
-        PREFLIGHT_KVM="✓ Available"
-        PREFLIGHT_KVM_CLR="${CLR_GREEN}"
-    else
-        PREFLIGHT_KVM="✗ Not available"
-        PREFLIGHT_KVM_CLR="${CLR_RED}"
-        errors=$((errors + 1))
-    fi
-    sleep 0.1
-
-    # Clear progress line
-    printf "\r\033[K"
-
-    PREFLIGHT_ERRORS=$errors
+    # Clear the input box
+    tput cuu $((box_lines + 1))
+    for ((i=0; i<box_lines+1; i++)); do
+        printf "\033[2K\n"
+    done
+    tput cuu $((box_lines + 1))
 }
 
+# --- 05-validation.sh ---
 # =============================================================================
 # Input validation functions
 # =============================================================================
@@ -705,28 +692,27 @@ collect_system_info() {
 validate_hostname() {
     local hostname="$1"
     # Hostname: alphanumeric and hyphens, 1-63 chars, cannot start/end with hyphen
-    if [[ ! "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
-        return 1
-    fi
-    return 0
+    [[ "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]
 }
 
 validate_fqdn() {
     local fqdn="$1"
     # FQDN: valid hostname labels separated by dots
-    if [[ ! "$fqdn" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]; then
-        return 1
-    fi
-    return 0
+    [[ "$fqdn" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]
 }
 
 validate_email() {
     local email="$1"
     # Basic email validation
-    if [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-        return 1
-    fi
-    return 0
+    [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]
+}
+
+validate_password() {
+    local password="$1"
+    # Password must contain only ASCII printable characters (no Cyrillic or other non-ASCII)
+    # Allowed: Latin letters, digits, and special characters (ASCII 32-126)
+    # Using LC_ALL=C ensures only ASCII characters match [:print:]
+    LC_ALL=C bash -c '[[ "$1" =~ ^[[:print:]]+$ ]]' _ "$password"
 }
 
 validate_subnet() {
@@ -735,7 +721,7 @@ validate_subnet() {
     if [[ ! "$subnet" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
         return 1
     fi
-    # Validate each octet is 0-255 using parameter expansion (no read/IFS to avoid terminal issues)
+    # Validate each octet is 0-255 using parameter expansion
     local ip="${subnet%/*}"
     local octet1 octet2 octet3 octet4 temp
     octet1="${ip%%.*}"
@@ -745,10 +731,7 @@ validate_subnet() {
     octet3="${temp%%.*}"
     octet4="${temp#*.}"
 
-    if [ "$octet1" -gt 255 ] || [ "$octet2" -gt 255 ] || [ "$octet3" -gt 255 ] || [ "$octet4" -gt 255 ]; then
-        return 1
-    fi
-    return 0
+    [[ "$octet1" -le 255 && "$octet2" -le 255 && "$octet3" -le 255 && "$octet4" -le 255 ]]
 }
 
 validate_timezone() {
@@ -760,122 +743,244 @@ validate_timezone() {
     # Fallback: In Rescue System, zoneinfo may not be available
     # Validate format (Region/City or Region/Subregion/City)
     if [[ "$tz" =~ ^[A-Za-z_]+/[A-Za-z_]+(/[A-Za-z_]+)?$ ]]; then
-        echo -e "${CLR_YELLOW}Note: Cannot verify timezone in Rescue System, format looks valid.${CLR_RESET}"
+        print_warning "Cannot verify timezone in Rescue System, format looks valid."
         return 0
     fi
     return 1
 }
 
-# --- 03-hardware.sh ---
 # =============================================================================
-# System status display
+# Input prompt helpers with validation
 # =============================================================================
 
-show_system_status() {
-    # Find all NVMe drives (excluding partitions)
-    NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
+# Prompt for input with validation, showing success checkmark when valid
+# Usage: prompt_with_validation "prompt" "default" "validator" "error_msg" "var_name"
+prompt_with_validation() {
+    local prompt="$1"
+    local default="$2"
+    local validator="$3"
+    local error_msg="$4"
+    local var_name="$5"
 
-    local nvme_error=0
-    if [ ${#NVME_DRIVES[@]} -eq 0 ]; then
-        nvme_error=1
+    local result
+    while true; do
+        read -e -p "$prompt" -i "$default" result
+        if $validator "$result"; then
+            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${prompt}${result}\033[K\n"
+            eval "$var_name=\"\$result\""
+            return 0
+        fi
+        print_error "$error_msg"
+    done
+}
+
+# Prompt for password with validation
+# Usage: prompt_password "prompt" "var_name"
+prompt_password() {
+    local prompt="$1"
+    local var_name="$2"
+    local password
+
+    password=$(read_password "$prompt")
+    while [[ -z "$password" ]] || ! validate_password "$password"; do
+        if [[ -z "$password" ]]; then
+            print_error "Password cannot be empty!"
+        else
+            print_error "Password contains invalid characters (Cyrillic or non-ASCII)."
+            print_error "Only Latin letters, digits, and special characters are allowed."
+        fi
+        password=$(read_password "$prompt")
+    done
+    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${prompt}********\033[K\n"
+    eval "$var_name=\"\$password\""
+}
+
+# --- 06-system-check.sh ---
+# =============================================================================
+# System checks and hardware detection
+# =============================================================================
+
+# Collect system info with progress indicator
+collect_system_info() {
+    local errors=0
+    local checks=6
+    local current=0
+    local i=0
+
+    # Progress update helper
+    update_progress() {
+        current=$((current + 1))
+        local pct=$((current * 100 / checks))
+        local filled=$((pct / 5))
+        local empty=$((20 - filled))
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} Checking system... [${CLR_GREEN}"
+        printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
+        printf "${CLR_RESET}${CLR_BLUE}"
+        printf '░%.0s' $(seq 1 $empty 2>/dev/null) 2>/dev/null || true
+        printf "${CLR_RESET}${CLR_YELLOW}] %3d%%${CLR_RESET}" "$pct"
+    }
+
+    # Check if running as root
+    update_progress
+    if [[ $EUID -ne 0 ]]; then
+        PREFLIGHT_ROOT="✗ Not root"
+        PREFLIGHT_ROOT_STATUS="error"
+        errors=$((errors + 1))
+    else
+        PREFLIGHT_ROOT="Running as root"
+        PREFLIGHT_ROOT_STATUS="ok"
+    fi
+    sleep 0.1
+
+    # Check internet connectivity
+    update_progress
+    if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
+        PREFLIGHT_NET="Available"
+        PREFLIGHT_NET_STATUS="ok"
+    else
+        PREFLIGHT_NET="No connection"
+        PREFLIGHT_NET_STATUS="error"
+        errors=$((errors + 1))
     fi
 
+    # Check available disk space (need at least 5GB in /root)
+    update_progress
+    local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
+    if [[ $free_space_mb -ge 5000 ]]; then
+        PREFLIGHT_DISK="${free_space_mb} MB"
+        PREFLIGHT_DISK_STATUS="ok"
+    else
+        PREFLIGHT_DISK="${free_space_mb} MB (need 5GB+)"
+        PREFLIGHT_DISK_STATUS="error"
+        errors=$((errors + 1))
+    fi
+    sleep 0.1
+
+    # Check RAM (need at least 4GB)
+    update_progress
+    local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    if [[ $total_ram_mb -ge 4000 ]]; then
+        PREFLIGHT_RAM="${total_ram_mb} MB"
+        PREFLIGHT_RAM_STATUS="ok"
+    else
+        PREFLIGHT_RAM="${total_ram_mb} MB (need 4GB+)"
+        PREFLIGHT_RAM_STATUS="error"
+        errors=$((errors + 1))
+    fi
+    sleep 0.1
+
+    # Check CPU cores
+    update_progress
+    local cpu_cores=$(nproc)
+    if [[ $cpu_cores -ge 2 ]]; then
+        PREFLIGHT_CPU="${cpu_cores} cores"
+        PREFLIGHT_CPU_STATUS="ok"
+    else
+        PREFLIGHT_CPU="${cpu_cores} core(s)"
+        PREFLIGHT_CPU_STATUS="warn"
+    fi
+    sleep 0.1
+
+    # Check if KVM is available
+    update_progress
+    if [[ -e /dev/kvm ]]; then
+        PREFLIGHT_KVM="Available"
+        PREFLIGHT_KVM_STATUS="ok"
+    else
+        PREFLIGHT_KVM="Not available"
+        PREFLIGHT_KVM_STATUS="error"
+        errors=$((errors + 1))
+    fi
+    sleep 0.1
+
+    # Clear progress line
+    printf "\r\033[K"
+
+    PREFLIGHT_ERRORS=$errors
+}
+
+# Detect NVMe drives
+detect_nvme_drives() {
+    # Find all NVMe drives (excluding partitions)
+    NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
+    NVME_COUNT=${#NVME_DRIVES[@]}
+
     # Collect drive info
-    local -a drive_names=()
-    local -a drive_sizes=()
-    local -a drive_models=()
+    DRIVE_NAMES=()
+    DRIVE_SIZES=()
+    DRIVE_MODELS=()
 
     for drive in "${NVME_DRIVES[@]}"; do
         local name=$(basename "$drive")
         local size=$(lsblk -d -n -o SIZE "$drive" | xargs)
         local model=$(lsblk -d -n -o MODEL "$drive" 2>/dev/null | xargs || echo "NVMe")
-        drive_names+=("$name")
-        drive_sizes+=("$size")
-        drive_models+=("$model")
+        DRIVE_NAMES+=("$name")
+        DRIVE_SIZES+=("$size")
+        DRIVE_MODELS+=("$model")
     done
 
-    # Store drive count for RAID mode selection (done in get_system_inputs)
-    NVME_COUNT=${#NVME_DRIVES[@]}
-
     # Set default RAID mode if not already set
-    if [ -z "$ZFS_RAID" ]; then
-        if [ $NVME_COUNT -lt 2 ]; then
+    if [[ -z "$ZFS_RAID" ]]; then
+        if [[ $NVME_COUNT -lt 2 ]]; then
             ZFS_RAID="single"
         else
             ZFS_RAID="raid1"
         fi
     fi
 
-    # Build system info using column for alignment
+    # Set drive variables for QEMU
+    NVME_DRIVE_1="${NVME_DRIVES[0]:-}"
+    NVME_DRIVE_2="${NVME_DRIVES[1]:-}"
+}
+
+# Display system status
+show_system_status() {
+    detect_nvme_drives
+
+    local nvme_error=0
+    if [[ $NVME_COUNT -eq 0 ]]; then
+        nvme_error=1
+    fi
+
+    # Build system info rows
     local sys_rows=""
 
-    # Root access
-    if [[ "$PREFLIGHT_ROOT" == *"Running as root"* ]]; then
-        sys_rows+="[OK]|Root Access|Running as root"$'\n'
-    else
-        sys_rows+="[ERROR]|Root Access|Not root"$'\n'
-    fi
+    # Helper to add row
+    add_row() {
+        local status="$1"
+        local label="$2"
+        local value="$3"
+        case "$status" in
+            ok)    sys_rows+="[OK]|${label}|${value}"$'\n' ;;
+            warn)  sys_rows+="[WARN]|${label}|${value}"$'\n' ;;
+            error) sys_rows+="[ERROR]|${label}|${value}"$'\n' ;;
+        esac
+    }
 
-    # Internet
-    if [[ "$PREFLIGHT_NET" == *"Available"* ]]; then
-        sys_rows+="[OK]|Internet|Available"$'\n'
-    else
-        sys_rows+="[ERROR]|Internet|No connection"$'\n'
-    fi
+    add_row "$PREFLIGHT_ROOT_STATUS" "Root Access" "$PREFLIGHT_ROOT"
+    add_row "$PREFLIGHT_NET_STATUS" "Internet" "$PREFLIGHT_NET"
+    add_row "$PREFLIGHT_DISK_STATUS" "Temp Space" "$PREFLIGHT_DISK"
+    add_row "$PREFLIGHT_RAM_STATUS" "RAM" "$PREFLIGHT_RAM"
+    add_row "$PREFLIGHT_CPU_STATUS" "CPU" "$PREFLIGHT_CPU"
+    add_row "$PREFLIGHT_KVM_STATUS" "KVM" "$PREFLIGHT_KVM"
 
-    # Temp space (rescue system free space for downloading ISO)
-    if [[ "$PREFLIGHT_DISK" == *"✓"* ]]; then
-        local disk_val="${PREFLIGHT_DISK#✓ }"
-        sys_rows+="[OK]|Temp Space|${disk_val}"$'\n'
-    else
-        local disk_val="${PREFLIGHT_DISK#✗ }"
-        sys_rows+="[ERROR]|Temp Space|${disk_val}"$'\n'
-    fi
+    # Remove trailing newline
+    sys_rows="${sys_rows%$'\n'}"
 
-    # RAM
-    if [[ "$PREFLIGHT_RAM" == *"✓"* ]]; then
-        local ram_val="${PREFLIGHT_RAM#✓ }"
-        sys_rows+="[OK]|RAM|${ram_val}"$'\n'
-    else
-        local ram_val="${PREFLIGHT_RAM#✗ }"
-        sys_rows+="[ERROR]|RAM|${ram_val}"$'\n'
-    fi
-
-    # CPU
-    if [[ "$PREFLIGHT_CPU" == *"✓"* ]]; then
-        local cpu_val="${PREFLIGHT_CPU#✓ }"
-        sys_rows+="[OK]|CPU|${cpu_val}"$'\n'
-    elif [[ "$PREFLIGHT_CPU" == *"⚠"* ]]; then
-        local cpu_val="${PREFLIGHT_CPU#⚠ }"
-        sys_rows+="[WARN]|CPU|${cpu_val}"$'\n'
-    else
-        local cpu_val="${PREFLIGHT_CPU#✗ }"
-        sys_rows+="[ERROR]|CPU|${cpu_val}"$'\n'
-    fi
-
-    # KVM
-    if [[ "$PREFLIGHT_KVM" == *"Available"* ]]; then
-        sys_rows+="[OK]|KVM|Available"
-    else
-        sys_rows+="[ERROR]|KVM|Not available"
-    fi
-
-    # Build storage rows (Mode will be selected interactively in get_system_inputs)
+    # Build storage rows
     local storage_rows=""
-    if [ $nvme_error -eq 1 ]; then
+    if [[ $nvme_error -eq 1 ]]; then
         storage_rows="[ERROR]|No NVMe drives detected!|"
     else
-        for i in "${!drive_names[@]}"; do
-            # Format: [OK] name "size  model" - combined for alignment with sys_rows
-            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}  ${drive_models[$i]:0:25}"
-            # Add newline only if not the last item
-            if [ $i -lt $((${#drive_names[@]} - 1)) ]; then
+        for i in "${!DRIVE_NAMES[@]}"; do
+            storage_rows+="[OK]|${DRIVE_NAMES[$i]}|${DRIVE_SIZES[$i]}  ${DRIVE_MODELS[$i]:0:25}"
+            if [[ $i -lt $((${#DRIVE_NAMES[@]} - 1)) ]]; then
                 storage_rows+=$'\n'
             fi
         done
     fi
 
-    # Display with boxes and colorize - combine all rows for uniform column alignment
+    # Display with boxes and colorize
     {
         echo "SYSTEM INFORMATION"
         {
@@ -888,24 +993,20 @@ show_system_status() {
 
     # Check for errors
     if [[ $PREFLIGHT_ERRORS -gt 0 ]]; then
-        echo -e "${CLR_RED}Pre-flight checks failed with $PREFLIGHT_ERRORS error(s). Exiting.${CLR_RESET}"
+        print_error "Pre-flight checks failed with $PREFLIGHT_ERRORS error(s). Exiting."
         exit 1
     fi
 
-    if [ $nvme_error -eq 1 ]; then
-        echo -e "${CLR_RED}No NVMe drives detected! Exiting.${CLR_RESET}"
+    if [[ $nvme_error -eq 1 ]]; then
+        print_error "No NVMe drives detected! Exiting."
         exit 1
     fi
 
-    echo -e "${CLR_GREEN}All checks passed!${CLR_RESET}"
+    print_success "All checks passed!"
     echo ""
-
-    # Set drive variables for QEMU
-    NVME_DRIVE_1="${NVME_DRIVES[0]}"
-    NVME_DRIVE_2="${NVME_DRIVES[1]:-}"
 }
 
-# --- 04-input.sh ---
+# --- 07-input.sh ---
 # =============================================================================
 # User input functions
 # =============================================================================
@@ -930,64 +1031,57 @@ prompt_or_default() {
     fi
 }
 
-get_system_inputs() {
+# =============================================================================
+# Network interface detection
+# =============================================================================
+
+detect_network_interface() {
     # Get default interface name (the one with default route)
     CURRENT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-    if [ -z "$CURRENT_INTERFACE" ]; then
+    if [[ -z "$CURRENT_INTERFACE" ]]; then
         CURRENT_INTERFACE="eth0"
     fi
 
     # CRITICAL: Get the predictable interface name for bare metal
-    # Rescue System often uses eth0, but Proxmox uses predictable naming (enp0s4, eno1, etc.)
-    # We must use the predictable name in the config, otherwise network won't work after reboot
+    # Rescue System often uses eth0, but Proxmox uses predictable naming
     PREDICTABLE_NAME=""
 
     # Try to get predictable name from udev
-    if [ -e "/sys/class/net/${CURRENT_INTERFACE}" ]; then
+    if [[ -e "/sys/class/net/${CURRENT_INTERFACE}" ]]; then
         # Try ID_NET_NAME_PATH first (most reliable for PCIe devices)
         PREDICTABLE_NAME=$(udevadm info "/sys/class/net/${CURRENT_INTERFACE}" 2>/dev/null | grep "ID_NET_NAME_PATH=" | cut -d'=' -f2)
 
         # Fallback to ID_NET_NAME_ONBOARD (for onboard NICs)
-        if [ -z "$PREDICTABLE_NAME" ]; then
+        if [[ -z "$PREDICTABLE_NAME" ]]; then
             PREDICTABLE_NAME=$(udevadm info "/sys/class/net/${CURRENT_INTERFACE}" 2>/dev/null | grep "ID_NET_NAME_ONBOARD=" | cut -d'=' -f2)
         fi
 
         # Fallback to altname from ip link
-        if [ -z "$PREDICTABLE_NAME" ]; then
+        if [[ -z "$PREDICTABLE_NAME" ]]; then
             PREDICTABLE_NAME=$(ip -d link show "$CURRENT_INTERFACE" 2>/dev/null | grep "altname" | awk '{print $2}' | head -1)
         fi
     fi
 
-    # Use predictable name if found, otherwise fall back to current interface name
-    if [ -n "$PREDICTABLE_NAME" ]; then
+    # Use predictable name if found
+    if [[ -n "$PREDICTABLE_NAME" ]]; then
         DEFAULT_INTERFACE="$PREDICTABLE_NAME"
-        echo -e "${CLR_GREEN}Detected predictable interface name: ${PREDICTABLE_NAME} (current: ${CURRENT_INTERFACE})${CLR_RESET}"
+        print_success "Detected predictable interface name: ${PREDICTABLE_NAME} (current: ${CURRENT_INTERFACE})"
     else
         DEFAULT_INTERFACE="$CURRENT_INTERFACE"
-        echo -e "${CLR_YELLOW}Warning: Could not detect predictable name, using: ${CURRENT_INTERFACE}${CLR_RESET}"
+        print_warning "Could not detect predictable name, using: ${CURRENT_INTERFACE}"
     fi
 
     # Get all available interfaces and their altnames for display
     AVAILABLE_ALTNAMES=$(ip -d link show | grep -v "lo:" | grep -E '(^[0-9]+:|altname)' | awk '/^[0-9]+:/ {interface=$2; gsub(/:/, "", interface); printf "%s", interface} /altname/ {printf ", %s", $2} END {print ""}' | sed 's/, $//')
 
     # Set INTERFACE_NAME to default if not already set
-    if [ -z "$INTERFACE_NAME" ]; then
+    if [[ -z "$INTERFACE_NAME" ]]; then
         INTERFACE_NAME="$DEFAULT_INTERFACE"
     fi
+}
 
-    # Prompt user for interface name or display in non-interactive mode
-    if [[ "$NON_INTERACTIVE" == true ]]; then
-        echo -e "${CLR_GREEN}✓ Network interface: ${INTERFACE_NAME}${CLR_RESET}"
-    else
-        echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
-        local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
-        read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
-        # Move cursor up one line and overwrite with checkmark
-        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\033[K\n"
-    fi
-
-    # Get network information from the CURRENT interface (the one active in Rescue)
-    # but use INTERFACE_NAME (predictable name) for the Proxmox configuration
+# Get network information from current interface
+collect_network_info() {
     MAIN_IPV4_CIDR=$(ip address show "$CURRENT_INTERFACE" | grep global | grep "inet " | xargs | cut -d" " -f2)
     MAIN_IPV4=$(echo "$MAIN_IPV4_CIDR" | cut -d'/' -f1)
     MAIN_IPV4_GW=$(ip route | grep default | xargs | cut -d" " -f3)
@@ -995,436 +1089,396 @@ get_system_inputs() {
     IPV6_CIDR=$(ip address show "$CURRENT_INTERFACE" | grep global | grep "inet6 " | xargs | cut -d" " -f2)
     MAIN_IPV6=$(echo "$IPV6_CIDR" | cut -d'/' -f1)
 
-    # Set a default value for FIRST_IPV6_CIDR even if IPV6_CIDR is empty
-    if [ -n "$IPV6_CIDR" ]; then
+    # Set a default value for FIRST_IPV6_CIDR
+    if [[ -n "$IPV6_CIDR" ]]; then
         FIRST_IPV6_CIDR="$(echo "$IPV6_CIDR" | cut -d'/' -f1 | cut -d':' -f1-4):1::1/80"
     else
         FIRST_IPV6_CIDR=""
     fi
+}
 
-    # Get user input for other configuration with validation
-    # Note: PVE_HOSTNAME is used instead of HOSTNAME to avoid conflict with bash built-in
-    if [[ "$NON_INTERACTIVE" == true ]]; then
-        # Use defaults or config values in non-interactive mode
-        PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
-        DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
-        TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
-        EMAIL="${EMAIL:-admin@example.com}"
-        BRIDGE_MODE="${BRIDGE_MODE:-internal}"
-        PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
+# =============================================================================
+# Input collection - Non-interactive mode
+# =============================================================================
 
-        # Display configuration values in non-interactive mode
-        echo -e "${CLR_GREEN}✓ Hostname: ${PVE_HOSTNAME}${CLR_RESET}"
-        echo -e "${CLR_GREEN}✓ Domain: ${DOMAIN_SUFFIX}${CLR_RESET}"
-        echo -e "${CLR_GREEN}✓ Timezone: ${TIMEZONE}${CLR_RESET}"
-        echo -e "${CLR_GREEN}✓ Email: ${EMAIL}${CLR_RESET}"
-        echo -e "${CLR_GREEN}✓ Bridge mode: ${BRIDGE_MODE}${CLR_RESET}"
-        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
-            echo -e "${CLR_GREEN}✓ Private subnet: ${PRIVATE_SUBNET}${CLR_RESET}"
-        fi
+get_inputs_non_interactive() {
+    # Use defaults or config values
+    PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
+    DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
+    TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
+    EMAIL="${EMAIL:-admin@example.com}"
+    BRIDGE_MODE="${BRIDGE_MODE:-internal}"
+    PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
-        # ZFS RAID mode default in non-interactive mode
-        if [[ -z "$ZFS_RAID" ]]; then
-            if [[ "${NVME_COUNT:-0}" -ge 2 ]]; then
-                ZFS_RAID="raid1"  # Default to mirror for redundancy
-            else
-                ZFS_RAID="single"
-            fi
-        fi
-        echo -e "${CLR_GREEN}✓ ZFS mode: ${ZFS_RAID}${CLR_RESET}"
+    # Display configuration
+    print_success "Network interface: ${INTERFACE_NAME}"
+    print_success "Hostname: ${PVE_HOSTNAME}"
+    print_success "Domain: ${DOMAIN_SUFFIX}"
+    print_success "Timezone: ${TIMEZONE}"
+    print_success "Email: ${EMAIL}"
+    print_success "Bridge mode: ${BRIDGE_MODE}"
 
-        # Password handling in non-interactive mode
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
-            exit 1
-        fi
+    if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+        print_success "Private subnet: ${PRIVATE_SUBNET}"
+    fi
 
-        # SSH Public Key in non-interactive mode
-        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            # Try to get from rescue system
-            if [[ -f /root/.ssh/authorized_keys ]]; then
-                SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-            fi
-        fi
-        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
-            exit 1
-        fi
-        parse_ssh_key "$SSH_PUBLIC_KEY"
-        echo -e "${CLR_GREEN}✓ SSH key configured (${SSH_KEY_TYPE})${CLR_RESET}"
-
-        # Tailscale in non-interactive mode
-        INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
-        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
-            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
-            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                echo -e "${CLR_GREEN}✓ Tailscale will be installed (auto-connect)${CLR_RESET}"
-            else
-                echo -e "${CLR_GREEN}✓ Tailscale will be installed (manual auth required)${CLR_RESET}"
-            fi
-            echo -e "${CLR_GREEN}✓ Tailscale SSH: ${TAILSCALE_SSH}${CLR_RESET}"
-            echo -e "${CLR_GREEN}✓ Tailscale WebUI: ${TAILSCALE_WEBUI}${CLR_RESET}"
+    # ZFS RAID mode
+    if [[ -z "$ZFS_RAID" ]]; then
+        if [[ "${NVME_COUNT:-0}" -ge 2 ]]; then
+            ZFS_RAID="raid1"
         else
-            echo -e "${CLR_GREEN}✓ Tailscale: skipped${CLR_RESET}"
+            ZFS_RAID="single"
         fi
+    fi
+    print_success "ZFS mode: ${ZFS_RAID}"
+
+    # Password required
+    if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+        print_error "NEW_ROOT_PASSWORD required in non-interactive mode"
+        exit 1
+    fi
+    if ! validate_password "$NEW_ROOT_PASSWORD"; then
+        print_error "Password contains invalid characters (Cyrillic or non-ASCII)."
+        exit 1
+    fi
+
+    # SSH Public Key
+    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+        SSH_PUBLIC_KEY=$(get_rescue_ssh_key)
+    fi
+    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+        print_error "SSH_PUBLIC_KEY required in non-interactive mode"
+        exit 1
+    fi
+    parse_ssh_key "$SSH_PUBLIC_KEY"
+    print_success "SSH key configured (${SSH_KEY_TYPE})"
+
+    # Tailscale
+    INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
+    if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+        TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+        TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            print_success "Tailscale will be installed (auto-connect)"
+        else
+            print_success "Tailscale will be installed (manual auth required)"
+        fi
+        print_success "Tailscale SSH: ${TAILSCALE_SSH}"
+        print_success "Tailscale WebUI: ${TAILSCALE_WEBUI}"
     else
-        # =====================================================================
-        # SECTION 1: Text inputs (hostname, domain, email, password)
-        # =====================================================================
+        print_success "Tailscale: skipped"
+    fi
+}
 
-        # Hostname - skip if already set via env
-        if [[ -n "$PVE_HOSTNAME" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Hostname: ${PVE_HOSTNAME} (from env)"
-        else
-            local hostname_prompt="Enter your hostname (e.g., pve, proxmox): "
-            while true; do
-                read -e -p "$hostname_prompt" -i "pve" PVE_HOSTNAME
-                if validate_hostname "$PVE_HOSTNAME"; then
-                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${hostname_prompt}${PVE_HOSTNAME}\033[K\n"
-                    break
-                fi
-                echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
-            done
+# =============================================================================
+# Input collection - Interactive mode
+# =============================================================================
+
+get_inputs_interactive() {
+    # =========================================================================
+    # SECTION 1: Text inputs
+    # =========================================================================
+
+    # Network interface
+    print_warning "Use the predictable name (enp*, eno*) for bare metal, not eth0"
+    local iface_prompt="Interface name (options: ${AVAILABLE_ALTNAMES}): "
+    read -e -p "$iface_prompt" -i "$INTERFACE_NAME" INTERFACE_NAME
+    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${iface_prompt}${INTERFACE_NAME}\033[K\n"
+
+    # Hostname
+    if [[ -n "$PVE_HOSTNAME" ]]; then
+        print_success "Hostname: ${PVE_HOSTNAME} (from env)"
+    else
+        prompt_with_validation \
+            "Enter your hostname (e.g., pve, proxmox): " \
+            "pve" \
+            "validate_hostname" \
+            "Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars)." \
+            "PVE_HOSTNAME"
+    fi
+
+    # Domain
+    if [[ -n "$DOMAIN_SUFFIX" ]]; then
+        print_success "Domain: ${DOMAIN_SUFFIX} (from env)"
+    else
+        local domain_prompt="Enter domain suffix: "
+        read -e -p "$domain_prompt" -i "local" DOMAIN_SUFFIX
+        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
+    fi
+
+    # Email
+    if [[ -n "$EMAIL" ]]; then
+        print_success "Email: ${EMAIL} (from env)"
+    else
+        prompt_with_validation \
+            "Enter your email address: " \
+            "admin@example.com" \
+            "validate_email" \
+            "Invalid email address format." \
+            "EMAIL"
+    fi
+
+    # Password
+    if [[ -n "$NEW_ROOT_PASSWORD" ]]; then
+        if ! validate_password "$NEW_ROOT_PASSWORD"; then
+            print_error "Password contains invalid characters (Cyrillic or non-ASCII)."
+            print_error "Only Latin letters, digits, and special characters are allowed."
+            exit 1
         fi
+        print_success "Password: ******** (from env)"
+    else
+        prompt_password "Enter your System New root password: " "NEW_ROOT_PASSWORD"
+    fi
 
-        # Domain - skip if already set via env
-        if [[ -n "$DOMAIN_SUFFIX" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Domain: ${DOMAIN_SUFFIX} (from env)"
+    # =========================================================================
+    # SECTION 2: Interactive menus
+    # =========================================================================
+
+    # --- Timezone ---
+    if [[ -n "$TIMEZONE" ]]; then
+        print_success "Timezone: ${TIMEZONE} (from env)"
+    else
+        local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
+
+        interactive_menu \
+            "Timezone (↑/↓ select, Enter confirm)" \
+            "" \
+            "Europe/Kyiv|Ukraine" \
+            "Europe/London|United Kingdom (GMT/BST)" \
+            "Europe/Berlin|Germany, Central Europe (CET/CEST)" \
+            "America/New_York|US Eastern Time (EST/EDT)" \
+            "America/Los_Angeles|US Pacific Time (PST/PDT)" \
+            "Asia/Tokyo|Japan Standard Time (JST)" \
+            "UTC|Coordinated Universal Time" \
+            "Custom|Enter timezone manually"
+
+        if [[ $MENU_SELECTED -eq 7 ]]; then
+            prompt_with_validation \
+                "Enter your timezone: " \
+                "Europe/Kyiv" \
+                "validate_timezone" \
+                "Invalid timezone. Use format like: Europe/London, America/New_York" \
+                "TIMEZONE"
         else
-            local domain_prompt="Enter domain suffix: "
-            read -e -p "$domain_prompt" -i "local" DOMAIN_SUFFIX
-            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
+            TIMEZONE="${tz_options[$MENU_SELECTED]}"
+            print_success "Timezone: ${TIMEZONE}"
         fi
+    fi
 
-        # Email - skip if already set via env
-        if [[ -n "$EMAIL" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Email: ${EMAIL} (from env)"
+    # --- Bridge mode ---
+    if [[ -n "$BRIDGE_MODE" ]]; then
+        print_success "Bridge mode: ${BRIDGE_MODE} (from env)"
+    else
+        local bridge_options=("internal" "external" "both")
+        local bridge_header="Configure network bridges for VMs and containers"$'\n'
+        bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
+        bridge_header+="vmbr1 = internal (NAT with private subnet)"
+
+        interactive_menu \
+            "Network Bridge Mode (↑/↓ select, Enter confirm)" \
+            "$bridge_header" \
+            "Internal only (NAT)|VMs use private IPs with NAT to internet" \
+            "External only (Bridged)|VMs get IPs from your router/DHCP" \
+            "Both bridges|Internal NAT + External bridged network"
+
+        BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
+        case "$BRIDGE_MODE" in
+            internal) print_success "Bridge mode: Internal NAT only (vmbr0)" ;;
+            external) print_success "Bridge mode: External bridged only (vmbr0)" ;;
+            both)     print_success "Bridge mode: Both (vmbr0=external, vmbr1=internal)" ;;
+        esac
+    fi
+
+    # --- Private subnet ---
+    if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
+        if [[ -n "$PRIVATE_SUBNET" ]]; then
+            print_success "Private subnet: ${PRIVATE_SUBNET} (from env)"
         else
-            local email_prompt="Enter your email address: "
-            while true; do
-                read -e -p "$email_prompt" -i "admin@example.com" EMAIL
-                if validate_email "$EMAIL"; then
-                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
-                    break
-                fi
-                echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
-            done
-        fi
-
-        # Password - skip if already set via env
-        if [[ -n "$NEW_ROOT_PASSWORD" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Password: ******** (from env)"
-        else
-            local password_prompt="Enter your System New root password: "
-            NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-                NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            done
-            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********\033[K\n"
-        fi
-
-        # =====================================================================
-        # SECTION 2: Interactive menus (all selection menus grouped together)
-        # =====================================================================
-        echo ""  # Visual separator before menus
-
-        # --- Timezone selection menu ---
-        if [[ -n "$TIMEZONE" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE} (from env)"
-        else
-            local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
+            local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
 
             interactive_menu \
-                "Timezone (↑/↓ select, Enter confirm)" \
-                "" \
-                "Europe/Kyiv|Ukraine" \
-                "Europe/London|United Kingdom (GMT/BST)" \
-                "Europe/Berlin|Germany, Central Europe (CET/CEST)" \
-                "America/New_York|US Eastern Time (EST/EDT)" \
-                "America/Los_Angeles|US Pacific Time (PST/PDT)" \
-                "Asia/Tokyo|Japan Standard Time (JST)" \
-                "UTC|Coordinated Universal Time" \
-                "Custom|Enter timezone manually"
+                "Private Subnet (↑/↓ select, Enter confirm)" \
+                "Internal network for VMs and containers" \
+                "10.0.0.0/24|Class A private (recommended)" \
+                "192.168.1.0/24|Class C private (common home network)" \
+                "172.16.0.0/24|Class B private" \
+                "Custom|Enter subnet manually"
 
-            if [[ $MENU_SELECTED -eq 7 ]]; then
-                # Custom timezone - prompt for manual entry
-                local tz_prompt="Enter your timezone: "
-                while true; do
-                    read -e -p "$tz_prompt" -i "Europe/Kyiv" TIMEZONE
-                    if validate_timezone "$TIMEZONE"; then
-                        printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}\033[K\n"
-                        break
-                    fi
-                    echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York${CLR_RESET}"
-                done
+            if [[ $MENU_SELECTED -eq 3 ]]; then
+                prompt_with_validation \
+                    "Enter your private subnet: " \
+                    "10.0.0.0/24" \
+                    "validate_subnet" \
+                    "Invalid subnet. Use CIDR format like: 10.0.0.0/24" \
+                    "PRIVATE_SUBNET"
             else
-                TIMEZONE="${tz_options[$MENU_SELECTED]}"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
-            fi
-        fi
-
-        # --- Network bridge mode selection menu ---
-        if [[ -n "$BRIDGE_MODE" ]]; then
-            echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: ${BRIDGE_MODE} (from env)"
-        else
-            local bridge_options=("internal" "external" "both")
-            local bridge_header="Configure network bridges for VMs and containers"$'\n'
-            bridge_header+="vmbr0 = external (bridged to physical NIC)"$'\n'
-            bridge_header+="vmbr1 = internal (NAT with private subnet)"
-
-            interactive_menu \
-                "Network Bridge Mode (↑/↓ select, Enter confirm)" \
-                "$bridge_header" \
-                "Internal only (NAT)|VMs use private IPs with NAT to internet" \
-                "External only (Bridged)|VMs get IPs from your router/DHCP" \
-                "Both bridges|Internal NAT + External bridged network"
-
-            BRIDGE_MODE="${bridge_options[$MENU_SELECTED]}"
-            case "$BRIDGE_MODE" in
-                internal)
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Internal NAT only (vmbr0)"
-                    ;;
-                external)
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: External bridged only (vmbr0)"
-                    ;;
-                both)
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Bridge mode: Both (vmbr0=external, vmbr1=internal)"
-                    ;;
-            esac
-        fi
-
-        # --- Private subnet selection menu (only if internal bridge is used) ---
-        if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
-            if [[ -n "$PRIVATE_SUBNET" ]]; then
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET} (from env)"
-            else
-                local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
-
-                interactive_menu \
-                    "Private Subnet (↑/↓ select, Enter confirm)" \
-                    "Internal network for VMs and containers" \
-                    "10.0.0.0/24|Class A private (recommended)" \
-                    "192.168.1.0/24|Class C private (common home network)" \
-                    "172.16.0.0/24|Class B private" \
-                    "Custom|Enter subnet manually"
-
-                if [[ $MENU_SELECTED -eq 3 ]]; then
-                    # Custom subnet - prompt for manual entry
-                    local subnet_prompt="Enter your private subnet: "
-                    while true; do
-                        read -e -p "$subnet_prompt" -i "10.0.0.0/24" PRIVATE_SUBNET
-                        if validate_subnet "$PRIVATE_SUBNET"; then
-                            printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
-                            break
-                        fi
-                        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-                    done
-                else
-                    PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
-                fi
-            fi
-        fi
-
-        # --- ZFS RAID mode selection menu (only if 2+ drives detected) ---
-        if [ "${NVME_COUNT:-0}" -ge 2 ]; then
-            if [[ -n "$ZFS_RAID" ]]; then
-                echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${ZFS_RAID} (from env)"
-            else
-                local zfs_options=("raid1" "raid0" "single")
-                local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
-
-                interactive_menu \
-                    "ZFS Storage Mode (↑/↓ select, Enter confirm)" \
-                    "" \
-                    "${zfs_labels[0]}|Survives 1 disk failure" \
-                    "${zfs_labels[1]}|2x space & speed, data loss if any disk fails" \
-                    "${zfs_labels[2]}|Uses first drive only, ignores other drives"
-
-                ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
-            fi
-        fi
-
-        # --- SSH Public Key selection menu ---
-        if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-            # SSH key already set via env - skip selection
-            parse_ssh_key "$SSH_PUBLIC_KEY"
-            echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key: ${SSH_KEY_TYPE} (from env)"
-        else
-            # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
-            local DETECTED_SSH_KEY=""
-            if [[ -f /root/.ssh/authorized_keys ]]; then
-                DETECTED_SSH_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-            fi
-
-            if [[ -n "$DETECTED_SSH_KEY" ]]; then
-                # Key detected - show interactive selector
-                parse_ssh_key "$DETECTED_SSH_KEY"
-
-                # Build header with key info
-                local ssh_header="! Password authentication will be DISABLED"$'\n'
-                ssh_header+="Detected key from Rescue System:"$'\n'
-                ssh_header+="  Type:    ${SSH_KEY_TYPE}"$'\n'
-                ssh_header+="  Key:     ${SSH_KEY_SHORT}"
-                if [[ -n "$SSH_KEY_COMMENT" ]]; then
-                    ssh_header+=$'\n'"  Comment: ${SSH_KEY_COMMENT}"
-                fi
-
-                interactive_menu \
-                    "SSH Public Key (↑/↓ select, Enter confirm)" \
-                    "$ssh_header" \
-                    "Use detected key|Recommended - already configured in Hetzner" \
-                    "Enter different key|Paste your own SSH public key"
-
-                if [[ $MENU_SELECTED -eq 0 ]]; then
-                    SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
-                else
-                    # User wants to enter a different key
-                    SSH_PUBLIC_KEY=""
-                fi
-            fi
-
-            # If no key yet (either not detected or user chose to enter manually)
-            if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-                # Show input box for manual entry
-                local ssh_input_content="! Password authentication will be DISABLED"$'\n'
-                if [[ -z "$DETECTED_SSH_KEY" ]]; then
-                    ssh_input_content+=$'\n'"No SSH key detected in Rescue System."
-                fi
-                ssh_input_content+=$'\n'$'\n'"Paste your SSH public key below:"$'\n'
-                ssh_input_content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
-
-                local input_box_lines
-                input_box_lines=$({
-                    echo "SSH Public Key Configuration"
-                    echo "$ssh_input_content"
-                } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
-
-                {
-                    echo "SSH Public Key Configuration"
-                    echo "$ssh_input_content"
-                } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
-
-                # Prompt for key
-                local ssh_prompt="SSH Public Key: "
-                while true; do
-                    read -e -p "$ssh_prompt" SSH_PUBLIC_KEY
-                    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-                        if validate_ssh_key "$SSH_PUBLIC_KEY"; then
-                            break
-                        else
-                            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continue anyway? (y/n): ${CLR_RESET}"
-                            read -rsn1 confirm
-                            echo ""
-                            if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                                break
-                            fi
-                        fi
-                    else
-                        echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
-                    fi
-                done
-
-                # Clear the input box and show confirmation (move up and clear)
-                tput cuu $((input_box_lines + 3))
-                for ((i=0; i<input_box_lines+3; i++)); do
-                    printf "\033[2K\n"
-                done
-                tput cuu $((input_box_lines + 3))
-
-                parse_ssh_key "$SSH_PUBLIC_KEY"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
-            fi
-        fi
-
-        # --- Tailscale VPN selection menu ---
-        if [[ -n "$INSTALL_TAILSCALE" ]]; then
-            # Tailscale already configured via env
-            if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-                TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
-                TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
-                if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: yes (auto-connect, from env)"
-                else
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: yes (manual auth, from env)"
-                fi
-            else
-                TAILSCALE_AUTH_KEY=""
-                TAILSCALE_SSH="no"
-                TAILSCALE_WEBUI="no"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale: skipped (from env)"
-            fi
-        else
-            local ts_header="Tailscale provides secure remote access to your server."$'\n'
-            ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
-
-            interactive_menu \
-                "Tailscale VPN - Optional (↑/↓ select, Enter confirm)" \
-                "$ts_header" \
-                "Install Tailscale|Recommended for secure remote access" \
-                "Skip installation|Install Tailscale later if needed"
-
-            if [[ $MENU_SELECTED -eq 0 ]]; then
-                INSTALL_TAILSCALE="yes"
-                TAILSCALE_SSH="yes"
-                TAILSCALE_WEBUI="yes"
-
-                # Show auth key input box (skip if TAILSCALE_AUTH_KEY already set)
-                if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
-                    local auth_content="Auth key enables automatic configuration."$'\n'
-                    auth_content+="Leave empty for manual auth after reboot."$'\n'
-                    auth_content+=$'\n'
-                    auth_content+="For unattended setup, use a reusable auth key"$'\n'
-                    auth_content+="with tags and expiry for better security."
-
-                    local auth_box_lines
-                    auth_box_lines=$({
-                        echo "Tailscale Auth Key (optional)"
-                        echo "$auth_content"
-                    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | wc -l)
-
-                    {
-                        echo "Tailscale Auth Key (optional)"
-                        echo "$auth_content"
-                    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH
-
-                    # Prompt for auth key
-                    read -e -p "Auth Key: " TAILSCALE_AUTH_KEY
-
-                    # Clear the input box (move up and clear)
-                    tput cuu $((auth_box_lines + 2))
-                    for ((i=0; i<auth_box_lines+2; i++)); do
-                        printf "\033[2K\n"
-                    done
-                    tput cuu $((auth_box_lines + 2))
-                fi
-
-                # Show confirmation
-                if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (auto-connect)"
-                else
-                    echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale will be installed (manual auth required)"
-                fi
-            else
-                INSTALL_TAILSCALE="no"
-                TAILSCALE_AUTH_KEY=""
-                TAILSCALE_SSH="no"
-                TAILSCALE_WEBUI="no"
-                echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
+                PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
+                print_success "Private subnet: ${PRIVATE_SUBNET}"
             fi
         fi
     fi
 
+    # --- ZFS RAID mode ---
+    if [[ "${NVME_COUNT:-0}" -ge 2 ]]; then
+        if [[ -n "$ZFS_RAID" ]]; then
+            print_success "ZFS mode: ${ZFS_RAID} (from env)"
+        else
+            local zfs_options=("raid1" "raid0" "single")
+            local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
+
+            interactive_menu \
+                "ZFS Storage Mode (↑/↓ select, Enter confirm)" \
+                "" \
+                "${zfs_labels[0]}|Survives 1 disk failure" \
+                "${zfs_labels[1]}|2x space & speed, data loss if any disk fails" \
+                "${zfs_labels[2]}|Uses first drive only, ignores other drives"
+
+            ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
+            print_success "ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
+        fi
+    fi
+
+    # --- SSH Public Key ---
+    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+        parse_ssh_key "$SSH_PUBLIC_KEY"
+        print_success "SSH key: ${SSH_KEY_TYPE} (from env)"
+    else
+        local DETECTED_SSH_KEY=$(get_rescue_ssh_key)
+
+        if [[ -n "$DETECTED_SSH_KEY" ]]; then
+            parse_ssh_key "$DETECTED_SSH_KEY"
+
+            local ssh_header="! Password authentication will be DISABLED"$'\n'
+            ssh_header+="Detected key from Rescue System:"$'\n'
+            ssh_header+="  Type:    ${SSH_KEY_TYPE}"$'\n'
+            ssh_header+="  Key:     ${SSH_KEY_SHORT}"
+            if [[ -n "$SSH_KEY_COMMENT" ]]; then
+                ssh_header+=$'\n'"  Comment: ${SSH_KEY_COMMENT}"
+            fi
+
+            interactive_menu \
+                "SSH Public Key (↑/↓ select, Enter confirm)" \
+                "$ssh_header" \
+                "Use detected key|Recommended - already configured in Hetzner" \
+                "Enter different key|Paste your own SSH public key"
+
+            if [[ $MENU_SELECTED -eq 0 ]]; then
+                SSH_PUBLIC_KEY="$DETECTED_SSH_KEY"
+                print_success "SSH key configured (${SSH_KEY_TYPE})"
+            else
+                SSH_PUBLIC_KEY=""
+            fi
+        fi
+
+        # Manual entry if no key yet
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            local ssh_content="! Password authentication will be DISABLED"$'\n'
+            if [[ -z "$DETECTED_SSH_KEY" ]]; then
+                ssh_content+=$'\n'"No SSH key detected in Rescue System."
+            fi
+            ssh_content+=$'\n'$'\n'"Paste your SSH public key below:"$'\n'
+            ssh_content+="(Usually from ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
+
+            input_box "SSH Public Key Configuration" "$ssh_content" "SSH Public Key: " ""
+
+            while [[ -z "$INPUT_VALUE" ]] || ! validate_ssh_key "$INPUT_VALUE"; do
+                if [[ -z "$INPUT_VALUE" ]]; then
+                    print_error "SSH public key is required for secure access!"
+                else
+                    print_warning "SSH key format may be invalid. Continue anyway? (y/n): "
+                    read -rsn1 confirm
+                    echo ""
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        break
+                    fi
+                fi
+                input_box "SSH Public Key Configuration" "$ssh_content" "SSH Public Key: " ""
+            done
+
+            SSH_PUBLIC_KEY="$INPUT_VALUE"
+            parse_ssh_key "$SSH_PUBLIC_KEY"
+            print_success "SSH key configured (${SSH_KEY_TYPE})"
+        fi
+    fi
+
+    # --- Tailscale ---
+    if [[ -n "$INSTALL_TAILSCALE" ]]; then
+        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                print_success "Tailscale: yes (auto-connect, from env)"
+            else
+                print_success "Tailscale: yes (manual auth, from env)"
+            fi
+        else
+            TAILSCALE_AUTH_KEY=""
+            TAILSCALE_SSH="no"
+            TAILSCALE_WEBUI="no"
+            print_success "Tailscale: skipped (from env)"
+        fi
+    else
+        local ts_header="Tailscale provides secure remote access to your server."$'\n'
+        ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
+
+        interactive_menu \
+            "Tailscale VPN - Optional (↑/↓ select, Enter confirm)" \
+            "$ts_header" \
+            "Install Tailscale|Recommended for secure remote access" \
+            "Skip installation|Install Tailscale later if needed"
+
+        if [[ $MENU_SELECTED -eq 0 ]]; then
+            INSTALL_TAILSCALE="yes"
+            TAILSCALE_SSH="yes"
+            TAILSCALE_WEBUI="yes"
+
+            if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
+                local auth_content="Auth key enables automatic configuration."$'\n'
+                auth_content+="Leave empty for manual auth after reboot."$'\n'
+                auth_content+=$'\n'
+                auth_content+="For unattended setup, use a reusable auth key"$'\n'
+                auth_content+="with tags and expiry for better security."
+
+                input_box "Tailscale Auth Key (optional)" "$auth_content" "Auth Key: " ""
+                TAILSCALE_AUTH_KEY="$INPUT_VALUE"
+            fi
+
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                print_success "Tailscale will be installed (auto-connect)"
+            else
+                print_success "Tailscale will be installed (manual auth required)"
+            fi
+        else
+            INSTALL_TAILSCALE="no"
+            TAILSCALE_AUTH_KEY=""
+            TAILSCALE_SSH="no"
+            TAILSCALE_WEBUI="no"
+            print_success "Tailscale installation skipped"
+        fi
+    fi
+}
+
+# =============================================================================
+# Main input collection function
+# =============================================================================
+
+get_system_inputs() {
+    detect_network_interface
+
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        print_success "Network interface: ${INTERFACE_NAME}"
+        get_inputs_non_interactive
+    else
+        get_inputs_interactive
+    fi
+
+    collect_network_info
+
     # Calculate derived values
     FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
 
-    # Calculate private network values (only if internal bridge is used)
+    # Calculate private network values
     if [[ "$BRIDGE_MODE" == "internal" || "$BRIDGE_MODE" == "both" ]]; then
-        # Get the network prefix (first three octets) from PRIVATE_SUBNET
         PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
         PRIVATE_IP="${PRIVATE_CIDR}.1"
         SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
@@ -1437,7 +1491,7 @@ get_system_inputs() {
     fi
 }
 
-# --- 05-packages.sh ---
+# --- 08-packages.sh ---
 # =============================================================================
 # Package preparation and ISO download
 # =============================================================================
@@ -1449,8 +1503,8 @@ prepare_packages() {
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
     show_progress $! "Downloading Proxmox GPG key"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to download Proxmox GPG key! Exiting."
         exit 1
     fi
 
@@ -1459,8 +1513,8 @@ prepare_packages() {
     apt update > /dev/null 2>&1 &
     show_progress $! "Updating package lists"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to update package lists! Exiting."
         exit 1
     fi
 
@@ -1468,8 +1522,8 @@ prepare_packages() {
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
     show_progress $! "Installing packages"
     wait $!
-    if [ $? -ne 0 ]; then
-        echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to install required packages! Exiting."
         exit 1
     fi
 }
@@ -1489,13 +1543,13 @@ get_latest_proxmox_ve_iso() {
 
 download_proxmox_iso() {
     if [[ -f "pve.iso" ]]; then
-        echo -e "${CLR_GREEN}✓ Proxmox ISO already exists, skipping download${CLR_RESET}"
+        print_success "Proxmox ISO already exists, skipping download"
         return 0
     fi
 
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
-        echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
+        print_error "Failed to retrieve Proxmox ISO URL! Exiting."
         exit 1
     fi
 
@@ -1507,12 +1561,12 @@ download_proxmox_iso() {
     show_progress $! "Downloading $ISO_FILENAME"
     wait $!
     if [[ $? -ne 0 ]]; then
-        echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
+        print_error "Failed to download Proxmox ISO! Exiting."
         exit 1
     fi
 
     if [[ ! -s "pve.iso" ]]; then
-        echo -e "${CLR_RED}Downloaded ISO file is empty or corrupted! Exiting.${CLR_RESET}"
+        print_error "Downloaded ISO file is empty or corrupted! Exiting."
         rm -f pve.iso
         exit 1
     fi
@@ -1532,25 +1586,25 @@ download_proxmox_iso() {
             rm -f /tmp/iso_checksum.txt
 
             if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                echo -e "${CLR_GREEN}✓ ISO checksum verified${CLR_RESET}"
+                print_success "ISO checksum verified"
             else
-                echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
-                echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
-                echo -e "${CLR_RED}Actual:   $ACTUAL_CHECKSUM${CLR_RESET}"
+                print_error "ISO checksum verification FAILED!"
+                print_error "Expected: $EXPECTED_CHECKSUM"
+                print_error "Actual:   $ACTUAL_CHECKSUM"
                 rm -f pve.iso SHA256SUMS
                 exit 1
             fi
         else
-            echo -e "${CLR_YELLOW}⚠ Could not find checksum for $ISO_FILENAME${CLR_RESET}"
+            print_warning "Could not find checksum for $ISO_FILENAME"
         fi
         rm -f SHA256SUMS
     else
-        echo -e "${CLR_YELLOW}⚠ Could not download checksum file${CLR_RESET}"
+        print_warning "Could not download checksum file"
     fi
 }
 
 make_answer_toml() {
-    echo -e "${CLR_BLUE}Making answer.toml...${CLR_RESET}"
+    print_info "Making answer.toml..."
 
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
@@ -1585,22 +1639,22 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}✓ answer.toml created (ZFS $ZFS_RAID mode)${CLR_RESET}"
+    print_success "answer.toml created (ZFS $ZFS_RAID mode)"
 }
 
 make_autoinstall_iso() {
-    echo -e "${CLR_BLUE}Making autoinstall.iso...${CLR_RESET}"
+    print_info "Making autoinstall.iso..."
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso
-    echo -e "${CLR_GREEN}✓ pve-autoinstall.iso created${CLR_RESET}"
+    print_success "pve-autoinstall.iso created"
 }
 
-# --- 06-qemu.sh ---
+# --- 09-qemu.sh ---
 # =============================================================================
 # QEMU installation and boot functions
 # =============================================================================
 
 is_uefi_mode() {
-    [ -d /sys/firmware/efi ]
+    [[ -d /sys/firmware/efi ]]
 }
 
 # Configure QEMU settings (shared between install and boot)
@@ -1608,10 +1662,10 @@ setup_qemu_config() {
     # UEFI configuration
     if is_uefi_mode; then
         UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        echo -e "${CLR_YELLOW}UEFI mode detected${CLR_RESET}"
+        print_info "UEFI mode detected"
     else
         UEFI_OPTS=""
-        echo -e "${CLR_YELLOW}Legacy BIOS mode${CLR_RESET}"
+        print_info "Legacy BIOS mode"
     fi
 
     # CPU and RAM configuration
@@ -1619,16 +1673,16 @@ setup_qemu_config() {
     local available_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
 
     QEMU_CORES=$((available_cores / 2))
-    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
-    [ $QEMU_CORES -gt $available_cores ] && QEMU_CORES=$available_cores
-    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
+    [[ $QEMU_CORES -lt 2 ]] && QEMU_CORES=2
+    [[ $QEMU_CORES -gt $available_cores ]] && QEMU_CORES=$available_cores
+    [[ $QEMU_CORES -gt 16 ]] && QEMU_CORES=16
 
     QEMU_RAM=8192
-    [ $available_ram_mb -lt 16384 ] && QEMU_RAM=4096
+    [[ $available_ram_mb -lt 16384 ]] && QEMU_RAM=4096
 
     # Drive configuration
     DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
-    [ -n "$NVME_DRIVE_2" ] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    [[ -n "$NVME_DRIVE_2" ]] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
 }
 
 # Install Proxmox via QEMU
@@ -1646,7 +1700,7 @@ install_proxmox() {
 
 # Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
-    echo -e "${CLR_GREEN}Booting installed Proxmox with SSH port forwarding...${CLR_RESET}"
+    print_success "Booting installed Proxmox with SSH port forwarding..."
     setup_qemu_config
 
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
@@ -1662,15 +1716,15 @@ boot_proxmox_with_port_forwarding() {
     wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
 }
 
-# --- 07-configure.sh ---
+# --- 10-configure.sh ---
 # =============================================================================
 # Post-installation configuration
 # =============================================================================
 
 make_template_files() {
-    echo -e "${CLR_BLUE}Modifying template files...${CLR_RESET}"
+    print_info "Modifying template files..."
 
-    echo -e "${CLR_YELLOW}Downloading template files...${CLR_RESET}"
+    print_info "Downloading template files..."
     mkdir -p ./template_files
 
     download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
@@ -1686,14 +1740,14 @@ make_template_files() {
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
     # Process hosts file
-    echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
+    print_info "Processing hosts file..."
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
     sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
-    echo -e "${CLR_YELLOW}Processing interfaces file (mode: ${BRIDGE_MODE:-internal})...${CLR_RESET}"
+    print_info "Processing interfaces file (mode: ${BRIDGE_MODE:-internal})..."
     sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
@@ -1702,12 +1756,12 @@ make_template_files() {
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
-    echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
+    print_success "Template files modified"
 }
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
-    echo -e "${CLR_BLUE}Starting post-installation configuration via SSH...${CLR_RESET}"
+    print_info "Starting post-installation configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
@@ -1725,7 +1779,7 @@ configure_proxmox_via_ssh() {
     remote_exec "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits
-    echo -e "${CLR_YELLOW}Configuring ZFS ARC memory limits...${CLR_RESET}"
+    print_info "Configuring ZFS ARC memory limits..."
     remote_exec_script << 'ZFSEOF'
         # Get total RAM in bytes
         TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -1755,10 +1809,9 @@ configure_proxmox_via_ssh() {
 ZFSEOF
 
     # Disable enterprise repositories
-    echo -e "${CLR_YELLOW}Disabling enterprise repositories...${CLR_RESET}"
+    print_info "Disabling enterprise repositories..."
     remote_exec_script << 'REPOEOF'
         # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
-        # These require a paid subscription and cause 401 errors
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
@@ -1796,7 +1849,7 @@ REPOEOF
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
-    # Configure UTF-8 locales for proper Cyrillic/international character support
+    # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq locales
@@ -1807,7 +1860,7 @@ REPOEOF
     '
 
     # Configure nf_conntrack
-    echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
+    print_info "Configuring nf_conntrack..."
     remote_exec_script << 'CONNTRACKEOF'
         # Add nf_conntrack module to load at boot
         if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
@@ -1835,7 +1888,7 @@ CONNTRACKEOF
     '
 
     # Remove Proxmox subscription notice
-    echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
+    print_info "Removing Proxmox subscription notice..."
     remote_exec_script << 'SUBEOF'
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
@@ -1847,7 +1900,7 @@ CONNTRACKEOF
 SUBEOF
 
     # Hide Ceph from UI (not needed for single-server setup)
-    echo -e "${CLR_YELLOW}Hiding Ceph from UI...${CLR_RESET}"
+    print_info "Hiding Ceph from UI..."
     remote_exec_script << 'CEPHEOF'
         # Create custom CSS to hide Ceph-related UI elements
         CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
@@ -1868,7 +1921,6 @@ CSS
         # Alternative: patch JavaScript to hide Ceph panel completely
         PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
         if [ -f "$PVE_MANAGER_JS" ]; then
-            # Hide Ceph from node tree navigation
             if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
                 sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
             fi
@@ -1900,48 +1952,48 @@ CEPHEOF
 
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            echo -e "${CLR_YELLOW}Authenticating Tailscale with provided auth key...${CLR_RESET}"
+            print_info "Authenticating Tailscale with provided auth key..."
             remote_exec "$TAILSCALE_UP_CMD"
 
             # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
             TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            echo -e "${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+            print_success "Tailscale authenticated. IP: ${TAILSCALE_IP}"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
+                print_info "Configuring Tailscale Serve for Proxmox Web UI..."
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                echo -e "${CLR_GREEN}✓ Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+                print_success "Proxmox Web UI available via Tailscale Serve"
             fi
         else
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""
-            echo -e "${CLR_YELLOW}Tailscale installed but not authenticated.${CLR_RESET}"
-            echo -e "${CLR_YELLOW}After reboot, run these commands to enable SSH and Web UI:${CLR_RESET}"
-            echo -e "${CLR_YELLOW}  tailscale up --ssh${CLR_RESET}"
-            echo -e "${CLR_YELLOW}  tailscale serve --bg --https=443 https://127.0.0.1:8006${CLR_RESET}"
+            print_warning "Tailscale installed but not authenticated."
+            print_info "After reboot, run these commands to enable SSH and Web UI:"
+            print_info "  tailscale up --ssh"
+            print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
         fi
     fi
 
     # Deploy SSH hardening LAST (after all other operations)
-    echo -e "${CLR_YELLOW}Deploying SSH hardening...${CLR_RESET}"
+    print_info "Deploying SSH hardening..."
 
     # Deploy SSH public key FIRST (before disabling password auth!)
     remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
     remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
     remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    echo -e "${CLR_GREEN}✓ Security hardening configured${CLR_RESET}"
+    print_success "Security hardening configured"
 
     # Power off the VM
-    echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
+    print_info "Powering off the VM..."
     remote_exec "poweroff" || true
 
     # Wait for QEMU to exit
-    echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
+    print_info "Waiting for QEMU process to exit..."
     wait $QEMU_PID || true
-    echo -e "${CLR_GREEN}✓ QEMU process exited${CLR_RESET}"
+    print_success "QEMU process exited"
 }
 
 # --- 99-main.sh ---
@@ -1953,15 +2005,8 @@ CEPHEOF
 show_total_time() {
     local end_time=$(date +%s)
     local total_seconds=$((end_time - INSTALL_START_TIME))
-    local hours=$((total_seconds / 3600))
-    local minutes=$(((total_seconds % 3600) / 60))
-    local seconds=$((total_seconds % 60))
-
-    if [[ $hours -gt 0 ]]; then
-        echo -e "${CLR_GREEN}Total installation time: ${hours}h ${minutes}m ${seconds}s${CLR_RESET}"
-    else
-        echo -e "${CLR_GREEN}Total installation time: ${minutes}m ${seconds}s${CLR_RESET}"
-    fi
+    local duration=$(format_duration $total_seconds)
+    print_success "Total installation time: ${duration}"
 }
 
 # Function to reboot into the main OS
@@ -2007,13 +2052,13 @@ reboot_to_main_os() {
     fi
     echo ""
 
-    #ask user to reboot the system
+    # Ask user to reboot the system
     read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
-        echo -e "${CLR_YELLOW}Rebooting the system...${CLR_RESET}"
+        print_info "Rebooting the system..."
         reboot
     else
-        echo -e "${CLR_YELLOW}Exiting...${CLR_RESET}"
+        print_info "Exiting..."
         exit 0
     fi
 }
@@ -2034,7 +2079,7 @@ install_proxmox
 
 # Boot and configure via SSH
 boot_proxmox_with_port_forwarding || {
-    echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
+    print_error "Failed to boot Proxmox with port forwarding. Exiting."
     exit 1
 }
 
