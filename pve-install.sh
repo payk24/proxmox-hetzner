@@ -359,82 +359,76 @@ wait_with_progress() {
 
 # --- 02-validation.sh ---
 # =============================================================================
-# Pre-flight checks
+# System info collection
 # =============================================================================
 
-preflight_checks() {
-    echo -e "${CLR_BLUE}Running pre-flight checks...${CLR_RESET}"
+collect_system_info() {
     local errors=0
 
+    # Store results in global variables for combined table display
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${CLR_RED}✗ Must run as root${CLR_RESET}"
+        PREFLIGHT_ROOT="✗ Not root"
+        PREFLIGHT_ROOT_CLR="${CLR_RED}"
         errors=$((errors + 1))
     else
-        echo -e "${CLR_GREEN}✓ Running as root${CLR_RESET}"
+        PREFLIGHT_ROOT="✓ Running as root"
+        PREFLIGHT_ROOT_CLR="${CLR_GREEN}"
     fi
 
     # Check internet connectivity
     if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
-        echo -e "${CLR_GREEN}✓ Internet connection available${CLR_RESET}"
+        PREFLIGHT_NET="✓ Available"
+        PREFLIGHT_NET_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ No internet connection${CLR_RESET}"
+        PREFLIGHT_NET="✗ No connection"
+        PREFLIGHT_NET_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check available disk space (need at least 5GB in /root)
     local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
     if [[ $free_space_mb -ge 5000 ]]; then
-        echo -e "${CLR_GREEN}✓ Disk space: ${free_space_mb}MB available${CLR_RESET}"
+        PREFLIGHT_DISK="✓ ${free_space_mb} MB"
+        PREFLIGHT_DISK_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient disk space: ${free_space_mb}MB (need 5GB+)${CLR_RESET}"
+        PREFLIGHT_DISK="✗ ${free_space_mb} MB (need 5GB+)"
+        PREFLIGHT_DISK_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check RAM (need at least 4GB)
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     if [[ $total_ram_mb -ge 4000 ]]; then
-        echo -e "${CLR_GREEN}✓ RAM: ${total_ram_mb}MB available${CLR_RESET}"
+        PREFLIGHT_RAM="✓ ${total_ram_mb} MB"
+        PREFLIGHT_RAM_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient RAM: ${total_ram_mb}MB (need 4GB+)${CLR_RESET}"
+        PREFLIGHT_RAM="✗ ${total_ram_mb} MB (need 4GB+)"
+        PREFLIGHT_RAM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check CPU cores
     local cpu_cores=$(nproc)
     if [[ $cpu_cores -ge 2 ]]; then
-        echo -e "${CLR_GREEN}✓ CPU: ${cpu_cores} cores${CLR_RESET}"
+        PREFLIGHT_CPU="✓ ${cpu_cores} cores"
+        PREFLIGHT_CPU_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_YELLOW}⚠ CPU: ${cpu_cores} core(s) - minimum 2 recommended${CLR_RESET}"
+        PREFLIGHT_CPU="⚠ ${cpu_cores} core(s)"
+        PREFLIGHT_CPU_CLR="${CLR_YELLOW}"
     fi
 
     # Check if KVM is available
     if [[ -e /dev/kvm ]]; then
-        echo -e "${CLR_GREEN}✓ KVM virtualization available${CLR_RESET}"
+        PREFLIGHT_KVM="✓ Available"
+        PREFLIGHT_KVM_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ KVM not available (required for installation)${CLR_RESET}"
+        PREFLIGHT_KVM="✗ Not available"
+        PREFLIGHT_KVM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
-    # Check required commands
-    for cmd in curl wget ip; do
-        if command -v $cmd > /dev/null 2>&1; then
-            echo -e "${CLR_GREEN}✓ Command '$cmd' available${CLR_RESET}"
-        else
-            echo -e "${CLR_RED}✗ Command '$cmd' not found${CLR_RESET}"
-            errors=$((errors + 1))
-        fi
-    done
-
-    echo ""
-
-    if [[ $errors -gt 0 ]]; then
-        echo -e "${CLR_RED}Pre-flight checks failed with $errors error(s). Exiting.${CLR_RESET}"
-        exit 1
-    fi
-
-    echo -e "${CLR_GREEN}✓ All pre-flight checks passed!${CLR_RESET}"
-    echo ""
+    PREFLIGHT_ERRORS=$errors
 }
 
 # =============================================================================
@@ -507,23 +501,23 @@ validate_timezone() {
 
 # --- 03-hardware.sh ---
 # =============================================================================
-# Hardware detection
+# System status display
 # =============================================================================
 
-detect_nvme_drives() {
+show_system_status() {
     # Find all NVMe drives (excluding partitions)
     NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
 
+    local nvme_error=0
     if [ ${#NVME_DRIVES[@]} -eq 0 ]; then
-        echo -e "${CLR_RED}✗ No NVMe drives detected! Exiting.${CLR_RESET}"
-        exit 1
+        nvme_error=1
     fi
 
-    # Collect drive info and find max model length
+    # Collect drive info
     local -a drive_names=()
     local -a drive_sizes=()
     local -a drive_models=()
-    local max_model_len=10  # minimum width
+    local max_model_len=10
 
     for drive in "${NVME_DRIVES[@]}"; do
         local name=$(basename "$drive")
@@ -535,33 +529,57 @@ detect_nvme_drives() {
         [[ ${#model} -gt $max_model_len ]] && max_model_len=${#model}
     done
 
-    # Calculate table width: "  name(8)  size(5)  model  "
-    local content_width=$((2 + 8 + 2 + 5 + 2 + max_model_len + 2))
-    local min_width=35  # minimum for mode text
-    [[ $content_width -lt $min_width ]] && content_width=$min_width
-
-    # Draw table
-    local border=$(printf '─%.0s' $(seq 1 $content_width))
-    echo -e "${CLR_BLUE}┌${border}┐${CLR_RESET}"
-    printf "${CLR_BLUE}│${CLR_RESET}  %-*s${CLR_BLUE}│${CLR_RESET}\n" $((content_width - 2)) "Storage Configuration"
-    echo -e "${CLR_BLUE}├${border}┤${CLR_RESET}"
-
-    for i in "${!drive_names[@]}"; do
-        printf "${CLR_BLUE}│${CLR_RESET}  %-8s  %5s  %-*s  ${CLR_BLUE}│${CLR_RESET}\n" \
-            "${drive_names[$i]}" "${drive_sizes[$i]}" "$max_model_len" "${drive_models[$i]}"
-    done
-
-    echo -e "${CLR_BLUE}├${border}┤${CLR_RESET}"
-
+    # Determine RAID mode
     if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-*s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" $((content_width - 4)) "Mode: Single Drive (no RAID)"
         RAID_MODE="single"
     else
-        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-*s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" $((content_width - 4)) "Mode: ZFS RAID-1 (mirror)"
         RAID_MODE="raid1"
     fi
 
-    echo -e "${CLR_BLUE}└${border}┘${CLR_RESET}"
+    # Print combined system info table
+    echo -e "${CLR_BLUE}┌─────────────────────────────────────────────────────┐${CLR_RESET}"
+    echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}System Information${CLR_RESET}                                 ${CLR_BLUE}│${CLR_RESET}"
+    echo -e "${CLR_BLUE}├───────────────────┬─────────────────────────────────┤${CLR_RESET}"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_ROOT_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Root Access" "$PREFLIGHT_ROOT"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_NET_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Internet" "$PREFLIGHT_NET"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_DISK_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "Disk Space" "$PREFLIGHT_DISK"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_RAM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "RAM" "$PREFLIGHT_RAM"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_CPU_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "CPU" "$PREFLIGHT_CPU"
+    printf "${CLR_BLUE}│${CLR_RESET} %-17s ${CLR_BLUE}│${CLR_RESET} ${PREFLIGHT_KVM_CLR}%-31s${CLR_RESET} ${CLR_BLUE}│${CLR_RESET}\n" "KVM" "$PREFLIGHT_KVM"
+    echo -e "${CLR_BLUE}├───────────────────┴─────────────────────────────────┤${CLR_RESET}"
+    echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_CYAN}Storage${CLR_RESET}                                            ${CLR_BLUE}│${CLR_RESET}"
+    echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
+
+    if [ $nvme_error -eq 1 ]; then
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_RED}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "✗ No NVMe drives detected!"
+    else
+        for i in "${!drive_names[@]}"; do
+            printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}✓${CLR_RESET} %-8s  %5s  %-28s  ${CLR_BLUE}│${CLR_RESET}\n" \
+                "${drive_names[$i]}" "${drive_sizes[$i]}" "${drive_models[$i]:0:28}"
+        done
+    fi
+
+    echo -e "${CLR_BLUE}├─────────────────────────────────────────────────────┤${CLR_RESET}"
+    if [ "$RAID_MODE" = "single" ]; then
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: Single Drive (no RAID)"
+    else
+        printf "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}%-49s${CLR_RESET}  ${CLR_BLUE}│${CLR_RESET}\n" "Mode: ZFS RAID-1 (mirror)"
+    fi
+    echo -e "${CLR_BLUE}└─────────────────────────────────────────────────────┘${CLR_RESET}"
+    echo ""
+
+    # Check for errors
+    if [[ $PREFLIGHT_ERRORS -gt 0 ]]; then
+        echo -e "${CLR_RED}Pre-flight checks failed with $PREFLIGHT_ERRORS error(s). Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    if [ $nvme_error -eq 1 ]; then
+        echo -e "${CLR_RED}No NVMe drives detected! Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    echo -e "${CLR_GREEN}✓ All checks passed!${CLR_RESET}"
     echo ""
 
     # Set drive variables for QEMU
@@ -1419,10 +1437,9 @@ reboot_to_main_os() {
 # Main execution flow
 # =============================================================================
 
-# Run pre-flight checks first
-preflight_checks
-
-detect_nvme_drives
+# Collect system info and display status
+collect_system_info
+show_system_status
 get_system_inputs
 prepare_packages
 download_proxmox_iso

@@ -1,80 +1,74 @@
 # =============================================================================
-# Pre-flight checks
+# System info collection
 # =============================================================================
 
-preflight_checks() {
-    echo -e "${CLR_BLUE}Running pre-flight checks...${CLR_RESET}"
+collect_system_info() {
     local errors=0
 
+    # Store results in global variables for combined table display
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${CLR_RED}✗ Must run as root${CLR_RESET}"
+        PREFLIGHT_ROOT="✗ Not root"
+        PREFLIGHT_ROOT_CLR="${CLR_RED}"
         errors=$((errors + 1))
     else
-        echo -e "${CLR_GREEN}✓ Running as root${CLR_RESET}"
+        PREFLIGHT_ROOT="✓ Running as root"
+        PREFLIGHT_ROOT_CLR="${CLR_GREEN}"
     fi
 
     # Check internet connectivity
     if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
-        echo -e "${CLR_GREEN}✓ Internet connection available${CLR_RESET}"
+        PREFLIGHT_NET="✓ Available"
+        PREFLIGHT_NET_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ No internet connection${CLR_RESET}"
+        PREFLIGHT_NET="✗ No connection"
+        PREFLIGHT_NET_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check available disk space (need at least 5GB in /root)
     local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
     if [[ $free_space_mb -ge 5000 ]]; then
-        echo -e "${CLR_GREEN}✓ Disk space: ${free_space_mb}MB available${CLR_RESET}"
+        PREFLIGHT_DISK="✓ ${free_space_mb} MB"
+        PREFLIGHT_DISK_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient disk space: ${free_space_mb}MB (need 5GB+)${CLR_RESET}"
+        PREFLIGHT_DISK="✗ ${free_space_mb} MB (need 5GB+)"
+        PREFLIGHT_DISK_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check RAM (need at least 4GB)
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     if [[ $total_ram_mb -ge 4000 ]]; then
-        echo -e "${CLR_GREEN}✓ RAM: ${total_ram_mb}MB available${CLR_RESET}"
+        PREFLIGHT_RAM="✓ ${total_ram_mb} MB"
+        PREFLIGHT_RAM_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient RAM: ${total_ram_mb}MB (need 4GB+)${CLR_RESET}"
+        PREFLIGHT_RAM="✗ ${total_ram_mb} MB (need 4GB+)"
+        PREFLIGHT_RAM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check CPU cores
     local cpu_cores=$(nproc)
     if [[ $cpu_cores -ge 2 ]]; then
-        echo -e "${CLR_GREEN}✓ CPU: ${cpu_cores} cores${CLR_RESET}"
+        PREFLIGHT_CPU="✓ ${cpu_cores} cores"
+        PREFLIGHT_CPU_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_YELLOW}⚠ CPU: ${cpu_cores} core(s) - minimum 2 recommended${CLR_RESET}"
+        PREFLIGHT_CPU="⚠ ${cpu_cores} core(s)"
+        PREFLIGHT_CPU_CLR="${CLR_YELLOW}"
     fi
 
     # Check if KVM is available
     if [[ -e /dev/kvm ]]; then
-        echo -e "${CLR_GREEN}✓ KVM virtualization available${CLR_RESET}"
+        PREFLIGHT_KVM="✓ Available"
+        PREFLIGHT_KVM_CLR="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ KVM not available (required for installation)${CLR_RESET}"
+        PREFLIGHT_KVM="✗ Not available"
+        PREFLIGHT_KVM_CLR="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
-    # Check required commands
-    for cmd in curl wget ip; do
-        if command -v $cmd > /dev/null 2>&1; then
-            echo -e "${CLR_GREEN}✓ Command '$cmd' available${CLR_RESET}"
-        else
-            echo -e "${CLR_RED}✗ Command '$cmd' not found${CLR_RESET}"
-            errors=$((errors + 1))
-        fi
-    done
-
-    echo ""
-
-    if [[ $errors -gt 0 ]]; then
-        echo -e "${CLR_RED}Pre-flight checks failed with $errors error(s). Exiting.${CLR_RESET}"
-        exit 1
-    fi
-
-    echo -e "${CLR_GREEN}✓ All pre-flight checks passed!${CLR_RESET}"
-    echo ""
+    PREFLIGHT_ERRORS=$errors
 }
 
 # =============================================================================
