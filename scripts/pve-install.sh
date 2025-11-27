@@ -810,10 +810,6 @@ TAILSCALESERVEEOF
     echo "  - SSH: Key-only authentication, modern ciphers"
     echo "  - CPU governor: Performance mode"
 
-    # NOTE: UEFI boot order must be configured from the Rescue System (not inside QEMU)
-    # because QEMU uses virtual OVMF firmware, not the physical server's UEFI.
-    # The configure_uefi_boot_order() function handles this after QEMU exits.
-
     # Power off the VM BEFORE restarting sshd (while password auth still works)
     # This ensures we can connect and poweroff the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
@@ -823,115 +819,6 @@ TAILSCALESERVEEOF
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
     echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
-}
-
-# Configure UEFI boot order from Rescue System (affects physical UEFI firmware)
-# This must run AFTER QEMU exits and BEFORE rebooting to the installed OS
-configure_uefi_boot_order() {
-    echo -e "${CLR_YELLOW}Configuring UEFI boot order on physical server...${CLR_RESET}"
-
-    # Check if we're in UEFI mode
-    if ! is_uefi_mode; then
-        echo -e "${CLR_YELLOW}Not in UEFI mode, skipping boot order configuration.${CLR_RESET}"
-        return 0
-    fi
-
-    # Install efibootmgr if not available
-    if ! command -v efibootmgr &> /dev/null; then
-        echo -e "${CLR_YELLOW}Installing efibootmgr...${CLR_RESET}"
-        apt-get update -qq && apt-get install -y -qq efibootmgr
-    fi
-
-    # Find the EFI System Partition on the first NVMe drive
-    # Proxmox ZFS installer creates partition 2 as EFI System Partition
-    ESP_PARTITION="${NVME_DRIVE_1}p2"
-    if [ ! -b "$ESP_PARTITION" ]; then
-        # Try without 'p' for non-NVMe drives
-        ESP_PARTITION="${NVME_DRIVE_1}2"
-    fi
-
-    if [ ! -b "$ESP_PARTITION" ]; then
-        echo -e "${CLR_RED}Could not find EFI System Partition. Boot order not configured.${CLR_RESET}"
-        return 1
-    fi
-
-    echo -e "${CLR_YELLOW}Found EFI partition: ${ESP_PARTITION}${CLR_RESET}"
-
-    # Create mount point and mount ESP
-    MOUNT_POINT="/tmp/esp_mount"
-    mkdir -p "$MOUNT_POINT"
-    mount "$ESP_PARTITION" "$MOUNT_POINT"
-
-    # Find the bootloader - Proxmox uses systemd-boot
-    BOOTLOADER=""
-    if [ -f "$MOUNT_POINT/EFI/systemd/systemd-bootx64.efi" ]; then
-        BOOTLOADER="\\EFI\\systemd\\systemd-bootx64.efi"
-        BOOTLOADER_PATH="/EFI/systemd/systemd-bootx64.efi"
-    elif [ -f "$MOUNT_POINT/EFI/BOOT/BOOTX64.EFI" ]; then
-        BOOTLOADER="\\EFI\\BOOT\\BOOTX64.EFI"
-        BOOTLOADER_PATH="/EFI/BOOT/BOOTX64.EFI"
-    elif [ -f "$MOUNT_POINT/EFI/proxmox/shimx64.efi" ]; then
-        BOOTLOADER="\\EFI\\proxmox\\shimx64.efi"
-        BOOTLOADER_PATH="/EFI/proxmox/shimx64.efi"
-    fi
-
-    # List what's in EFI directory for debugging
-    echo -e "${CLR_YELLOW}EFI directory contents:${CLR_RESET}"
-    ls -la "$MOUNT_POINT/EFI/" 2>/dev/null || true
-
-    umount "$MOUNT_POINT"
-    rmdir "$MOUNT_POINT"
-
-    if [ -z "$BOOTLOADER" ]; then
-        echo -e "${CLR_RED}Could not find bootloader in ESP. Boot order not configured.${CLR_RESET}"
-        return 1
-    fi
-
-    echo -e "${CLR_YELLOW}Found bootloader: ${BOOTLOADER_PATH}${CLR_RESET}"
-
-    # Get the disk identifier for efibootmgr (e.g., /dev/nvme0n1)
-    DISK="$NVME_DRIVE_1"
-    PART_NUM=2  # EFI partition is typically partition 2
-
-    # Check current boot entries
-    echo -e "${CLR_YELLOW}Current UEFI boot entries:${CLR_RESET}"
-    efibootmgr -v 2>/dev/null || efibootmgr
-
-    # Remove any existing "Proxmox" boot entries to avoid duplicates
-    for entry in $(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}"); do
-        efibootmgr -b "$entry" -B 2>/dev/null || true
-    done
-
-    # Create new boot entry for Proxmox
-    echo -e "${CLR_YELLOW}Creating Proxmox boot entry...${CLR_RESET}"
-    efibootmgr -c -d "$DISK" -p "$PART_NUM" -L "Proxmox VE" -l "$BOOTLOADER"
-
-    # Get the new Proxmox boot entry number
-    PROXMOX_ENTRY=$(efibootmgr | grep -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | head -1)
-
-    if [ -n "$PROXMOX_ENTRY" ]; then
-        # Get all other entries (PXE, Shell, etc.)
-        OTHER_ENTRIES=$(efibootmgr | grep -E "Boot[0-9A-F]{4}" | grep -v -i "proxmox" | grep -oP "Boot\K[0-9A-F]{4}" | tr '\n' ',' | sed 's/,$//')
-
-        # Set boot order: Proxmox first, then others
-        if [ -n "$OTHER_ENTRIES" ]; then
-            NEW_ORDER="${PROXMOX_ENTRY},${OTHER_ENTRIES}"
-        else
-            NEW_ORDER="${PROXMOX_ENTRY}"
-        fi
-
-        echo -e "${CLR_YELLOW}Setting boot order: ${NEW_ORDER}${CLR_RESET}"
-        efibootmgr -o "$NEW_ORDER"
-
-        echo -e "${CLR_GREEN}UEFI boot order configured: Proxmox first${CLR_RESET}"
-    else
-        echo -e "${CLR_RED}Failed to create Proxmox boot entry.${CLR_RESET}"
-        return 1
-    fi
-
-    # Show final boot configuration
-    echo -e "${CLR_YELLOW}Final UEFI boot configuration:${CLR_RESET}"
-    efibootmgr
 }
 
 # Function to reboot into the main OS
@@ -946,7 +833,6 @@ reboot_to_main_os() {
     echo "  ✓ CPU governor set to performance"
     echo "  ✓ Kernel parameters optimized for virtualization"
     echo "  ✓ Subscription notice removed"
-    echo "  ✓ UEFI boot order: disk first, PXE second"
     echo ""
     echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
     echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
@@ -1009,9 +895,6 @@ boot_proxmox_with_port_forwarding || {
 
 # Configure Proxmox via SSH
 configure_proxmox_via_ssh
-
-# Configure UEFI boot order from Rescue System (physical UEFI firmware)
-configure_uefi_boot_order
 
 # Reboot to the main OS
 reboot_to_main_os
