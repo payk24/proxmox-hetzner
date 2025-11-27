@@ -1919,11 +1919,6 @@ make_template_files() {
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
 
-    # Shell and MOTD templates
-    download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
-    download_file "./template_files/00-proxmox-motd" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/00-proxmox-motd"
-    download_file "./template_files/firewall-setup.sh" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/firewall-setup.sh"
-
     # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
@@ -1952,7 +1947,7 @@ make_template_files() {
 configure_base_system() {
     print_info "Starting base system configuration via SSH..."
     make_template_files
-    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" >/dev/null 2>&1 || true
+    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
@@ -1962,15 +1957,16 @@ configure_base_system() {
     remote_copy "template_files/proxmox.sources" "/etc/apt/sources.list.d/proxmox.sources"
 
     # Basic system configuration
-    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak" >/dev/null 2>&1
-    remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf" >/dev/null 2>&1
-    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname" >/dev/null 2>&1
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket" >/dev/null 2>&1
+    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
+    remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
+    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits
-    remote_exec_with_progress "Configuring ZFS ARC memory limits" '
+    print_info "Configuring ZFS ARC memory limits..."
+    remote_exec_script << 'ZFSEOF'
         # Get total RAM in bytes
-        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
         TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
         # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
@@ -1992,23 +1988,28 @@ configure_base_system() {
         mkdir -p /etc/modprobe.d
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
-    '
+
+        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
+ZFSEOF
 
     # Disable enterprise repositories
-    remote_exec_with_progress "Disabling enterprise repositories" '
+    print_info "Disabling enterprise repositories..."
+    remote_exec_script << 'REPOEOF'
         # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
                 mv "$repo_file" "${repo_file}.disabled"
+                echo "Disabled $(basename "$repo_file")"
             fi
         done
 
         # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
-            sed -i "s|^deb.*enterprise.proxmox.com|# &|g" /etc/apt/sources.list
+            sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
+            echo "Commented out enterprise repos in sources.list"
         fi
-    '
+REPOEOF
 
     # Update all system packages
     remote_exec_with_progress "Updating system packages" '
@@ -2033,12 +2034,87 @@ configure_base_system() {
     '
 
     # Install and configure zsh as default shell
-    remote_exec_with_progress "Installing ZSH" '
+    print_info "Installing and configuring zsh..."
+    remote_exec_script << 'ZSHEOF'
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting
+
+        # Create minimal .zshrc for root
+        cat > /root/.zshrc << 'ZSHRC'
+# Proxmox ZSH Configuration
+
+# History settings
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt SHARE_HISTORY
+setopt APPEND_HISTORY
+
+# Key bindings
+bindkey -e
+bindkey '^[[A' history-search-backward
+bindkey '^[[B' history-search-forward
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+bindkey '^[[3~' delete-char
+
+# Completion
+autoload -Uz compinit && compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+
+# Colors
+autoload -Uz colors && colors
+
+# Prompt with git branch support
+autoload -Uz vcs_info
+precmd() { vcs_info }
+zstyle ':vcs_info:git:*' formats ' (%b)'
+setopt PROMPT_SUBST
+PROMPT='%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '
+
+# Aliases
+alias ll='ls -lah --color=auto'
+alias la='ls -A --color=auto'
+alias l='ls -CF --color=auto'
+alias grep='grep --color=auto'
+alias df='df -h'
+alias du='du -h'
+alias free='free -h'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Proxmox aliases
+alias qml='qm list'
+alias pctl='pct list'
+alias pvesh='pvesh'
+alias zpl='zpool list'
+alias zst='zpool status'
+
+# Use bat instead of cat if available
+command -v bat &>/dev/null && alias cat='bat --paging=never'
+
+# Use btop instead of top if available
+command -v btop &>/dev/null && alias top='btop'
+
+# Load plugins if available
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
+    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Auto-suggestions color (gray)
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+ZSHRC
+
+        # Set zsh as default shell for root
         chsh -s /bin/zsh root
-    '
-    remote_copy "template_files/zshrc" "/root/.zshrc"
+
+        echo "ZSH installed and configured as default shell"
+ZSHEOF
+    print_success "ZSH configured as default shell"
 
     # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
@@ -2048,10 +2124,6 @@ configure_base_system() {
         sed -i "s/# ru_RU.UTF-8/ru_RU.UTF-8/" /etc/locale.gen
         locale-gen
         update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-
-        # Set locale in /etc/environment for all sessions
-        grep -q "LANG=" /etc/environment || echo "LANG=en_US.UTF-8" >> /etc/environment
-        grep -q "LC_ALL=" /etc/environment || echo "LC_ALL=en_US.UTF-8" >> /etc/environment
     '
 
     # Configure CPU governor
@@ -2065,28 +2137,17 @@ configure_base_system() {
         fi
     '
 
-    # Remove Proxmox subscription notice (use heredoc to avoid quote escaping issues)
-    {
-        remote_exec_script << 'SUBNOTICE'
-            JS_FILE="/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js"
-            if [ -f "$JS_FILE" ]; then
-                # Backup original
-                cp "$JS_FILE" "${JS_FILE}.bak"
-
-                # Proxmox 8.x: patch the checked_command function to skip subscription check
-                # This replaces "Ext.Msg.show({" with "void({ //" only for subscription dialog
-                sed -Ezi "s/(Ext\.Msg\.show\(\{\s+title:\s+gettext\('No valid subscription')/void({ \/\/ \1/g" "$JS_FILE"
-
-                # Verify file is not corrupted (should still have content)
-                if [ ! -s "$JS_FILE" ] || ! grep -q "Ext.define" "$JS_FILE"; then
-                    cp "${JS_FILE}.bak" "$JS_FILE"
-                fi
-
-                systemctl restart pveproxy.service 2>/dev/null || true
-            fi
-SUBNOTICE
-    } > /dev/null 2>&1 &
-    show_progress $! "Removing Proxmox subscription notice"
+    # Remove Proxmox subscription notice
+    print_info "Removing Proxmox subscription notice..."
+    remote_exec_script << 'SUBEOF'
+        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
+            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+            systemctl restart pveproxy.service
+            echo "Subscription notice removed"
+        else
+            echo "proxmoxlib.js not found, skipping"
+        fi
+SUBEOF
 
     print_success "Base system configuration complete"
 }
@@ -2102,47 +2163,48 @@ configure_network() {
     # ==========================================================================
     # nf_conntrack configuration
     # ==========================================================================
-    {
-        remote_exec_script << 'CONNTRACKEOF'
-            # Add nf_conntrack module to load at boot
-            if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
-                echo "nf_conntrack" >> /etc/modules
-            fi
+    print_info "Configuring nf_conntrack..."
+    remote_exec_script << 'CONNTRACKEOF'
+        # Add nf_conntrack module to load at boot
+        if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
+            echo "nf_conntrack" >> /etc/modules
+        fi
 
-            # Configure connection tracking limits
-            if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
-                echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
-                echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
-            fi
+        # Configure connection tracking limits
+        if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
+            echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
+            echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
+        fi
+
+        echo "nf_conntrack configured"
 CONNTRACKEOF
-    } > /dev/null 2>&1 &
-    show_progress $! "Configuring nf_conntrack"
 
     # ==========================================================================
     # NTP Synchronization (always enabled)
     # ==========================================================================
-    {
-        remote_exec_script << 'NTPEOF'
-            # Enable and configure systemd-timesyncd
-            apt-get install -yqq systemd-timesyncd 2>/dev/null || true
+    print_info "Configuring NTP time synchronization..."
+    remote_exec_script << 'NTPEOF'
+        # Enable and configure systemd-timesyncd
+        apt-get install -yqq systemd-timesyncd 2>/dev/null || true
 
-            # Configure NTP servers
-            mkdir -p /etc/systemd/timesyncd.conf.d
-            cat > /etc/systemd/timesyncd.conf.d/local.conf << 'CONF'
+        # Configure NTP servers
+        mkdir -p /etc/systemd/timesyncd.conf.d
+        cat > /etc/systemd/timesyncd.conf.d/local.conf << 'CONF'
 [Time]
 NTP=0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org 3.pool.ntp.org
 FallbackNTP=ntp.ubuntu.com time.cloudflare.com
 CONF
 
-            # Enable and start timesyncd
-            systemctl enable systemd-timesyncd
-            systemctl restart systemd-timesyncd
+        # Enable and start timesyncd
+        systemctl enable systemd-timesyncd
+        systemctl restart systemd-timesyncd
 
-            # Set hardware clock from system time
-            hwclock --systohc 2>/dev/null || true
+        # Set hardware clock from system time
+        hwclock --systohc 2>/dev/null || true
+
+        echo "NTP synchronization configured"
 NTPEOF
-    } > /dev/null 2>&1 &
-    show_progress $! "Configuring NTP time synchronization"
+    print_success "NTP time synchronization configured"
 
     # ==========================================================================
     # Tailscale VPN (optional)
@@ -2196,11 +2258,76 @@ NTPEOF
     # Basic Firewall (optional, default: no)
     # ==========================================================================
     if [[ "$INSTALL_FIREWALL" == "yes" ]]; then
-        {
-            remote_copy "template_files/firewall-setup.sh" "/tmp/firewall-setup.sh"
-            remote_exec "chmod +x /tmp/firewall-setup.sh && /tmp/firewall-setup.sh && rm /tmp/firewall-setup.sh"
-        } > /dev/null 2>&1 &
-        show_progress $! "Configuring basic firewall rules"
+        print_info "Configuring basic firewall rules..."
+        remote_exec_script << 'FWEOF'
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -yqq iptables-persistent netfilter-persistent
+
+            # Flush existing rules
+            iptables -F
+            iptables -X
+            iptables -t nat -F
+            iptables -t nat -X
+
+            # Default policies
+            iptables -P INPUT DROP
+            iptables -P FORWARD ACCEPT
+            iptables -P OUTPUT ACCEPT
+
+            # Allow loopback
+            iptables -A INPUT -i lo -j ACCEPT
+
+            # Allow established connections
+            iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+            # Allow ICMP (ping)
+            iptables -A INPUT -p icmp -j ACCEPT
+
+            # Allow SSH (port 22)
+            iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+            # Allow Proxmox Web UI (port 8006)
+            iptables -A INPUT -p tcp --dport 8006 -j ACCEPT
+
+            # Allow VNC console (ports 5900-5999)
+            iptables -A INPUT -p tcp --dport 5900:5999 -j ACCEPT
+
+            # Allow Spice console (port 3128)
+            iptables -A INPUT -p tcp --dport 3128 -j ACCEPT
+
+            # Allow Proxmox cluster communication (if needed)
+            iptables -A INPUT -p tcp --dport 111 -j ACCEPT
+            iptables -A INPUT -p udp --dport 111 -j ACCEPT
+            iptables -A INPUT -p tcp --dport 85 -j ACCEPT
+
+            # Allow internal bridge traffic
+            iptables -A INPUT -i vmbr+ -j ACCEPT
+
+            # Log dropped packets (optional, can be noisy)
+            # iptables -A INPUT -j LOG --log-prefix "IPTables-Dropped: "
+
+            # Save rules
+            netfilter-persistent save
+
+            # IPv6 rules (similar)
+            ip6tables -F
+            ip6tables -P INPUT DROP
+            ip6tables -P FORWARD ACCEPT
+            ip6tables -P OUTPUT ACCEPT
+            ip6tables -A INPUT -i lo -j ACCEPT
+            ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+            ip6tables -A INPUT -p ipv6-icmp -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 8006 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 5900:5999 -j ACCEPT
+            ip6tables -A INPUT -p tcp --dport 3128 -j ACCEPT
+            ip6tables -A INPUT -i vmbr+ -j ACCEPT
+
+            netfilter-persistent save
+
+            echo "Firewall configured: SSH(22), PVE Web(8006), VNC, Spice allowed"
+FWEOF
+        print_success "Basic firewall configured"
     fi
 
     print_success "Network configuration complete"
@@ -2218,45 +2345,47 @@ configure_optional_features() {
     # Hide Ceph from UI (optional, default: yes)
     # ==========================================================================
     if [[ "$HIDE_CEPH" == "yes" ]]; then
-        {
-            remote_exec_script << 'CEPHEOF'
-                # Create custom CSS to hide Ceph-related UI elements
-                CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-                cat > "$CUSTOM_CSS" << 'CSS'
+        print_info "Hiding Ceph from UI..."
+        remote_exec_script << 'CEPHEOF'
+            # Create custom CSS to hide Ceph-related UI elements
+            CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
+            cat > "$CUSTOM_CSS" << 'CSS'
 /* Hide Ceph menu items - not needed for single server */
 #pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
 .x-treelist-item-text:has-text("Ceph") { display: none !important; }
 tr[data-qtip*="Ceph"] { display: none !important; }
 CSS
 
-                # Add custom CSS to index template if not already added
-                INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-                if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-                    sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-                fi
+            # Add custom CSS to index template if not already added
+            INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
+            if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
+                sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
+                echo "Custom CSS added to hide Ceph"
+            fi
 
-                # Alternative: patch JavaScript to hide Ceph panel completely
-                PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-                if [ -f "$PVE_MANAGER_JS" ]; then
-                    if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                        sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
-                    fi
+            # Alternative: patch JavaScript to hide Ceph panel completely
+            PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
+            if [ -f "$PVE_MANAGER_JS" ]; then
+                if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
+                    sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
                 fi
+            fi
 
-                systemctl restart pveproxy.service
+            systemctl restart pveproxy.service
+            echo "Ceph UI elements hidden"
 CEPHEOF
-        } > /dev/null 2>&1 &
-        show_progress $! "Hiding Ceph from UI"
+    else
+        print_info "Skipping Ceph UI hiding (disabled)"
     fi
 
     # ==========================================================================
     # Journald Optimization (optional, default: yes)
     # ==========================================================================
     if [[ "$OPTIMIZE_JOURNALD" == "yes" ]]; then
-        {
-            remote_exec_script << 'JOURNALDEOF'
-                mkdir -p /etc/systemd/journald.conf.d
-                cat > /etc/systemd/journald.conf.d/size-limit.conf << 'CONF'
+        print_info "Optimizing journald log settings..."
+        remote_exec_script << 'JOURNALDEOF'
+            mkdir -p /etc/systemd/journald.conf.d
+            cat > /etc/systemd/journald.conf.d/size-limit.conf << 'CONF'
 [Journal]
 # Limit journal size to prevent disk fill
 SystemMaxUse=1G
@@ -2267,14 +2396,15 @@ MaxFileSec=1week
 Compress=yes
 CONF
 
-                # Restart journald to apply changes
-                systemctl restart systemd-journald
+            # Restart journald to apply changes
+            systemctl restart systemd-journald
 
-                # Clean up old logs
-                journalctl --vacuum-size=500M 2>/dev/null || true
+            # Clean up old logs
+            journalctl --vacuum-size=500M 2>/dev/null || true
+
+            echo "Journald optimized: max 1GB, 1 month retention"
 JOURNALDEOF
-        } > /dev/null 2>&1 &
-        show_progress $! "Optimizing journald log settings"
+        print_success "Journald optimization configured"
     fi
 
     # ==========================================================================
@@ -2324,13 +2454,115 @@ EOF
     # Custom MOTD (optional, default: yes)
     # ==========================================================================
     if [[ "$INSTALL_MOTD" == "yes" ]]; then
-        {
-            remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
-            remote_copy "template_files/00-proxmox-motd" "/etc/update-motd.d/00-proxmox-info"
-            remote_exec "chmod +x /etc/update-motd.d/00-proxmox-info"
-            remote_exec "sed -i 's/^#*PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null || true"
-        } > /dev/null 2>&1 &
-        show_progress $! "Configuring custom MOTD"
+        print_info "Configuring custom MOTD..."
+        remote_exec_script << 'MOTDEOF'
+            # Disable default MOTD components
+            chmod -x /etc/update-motd.d/* 2>/dev/null || true
+
+            # Create custom MOTD script
+            cat > /etc/update-motd.d/00-proxmox-info << 'SCRIPT'
+#!/bin/bash
+# Proxmox System Information MOTD
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Get system info
+HOSTNAME=$(hostname)
+UPTIME=$(uptime -p | sed 's/up //')
+LOAD=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
+KERNEL=$(uname -r)
+
+# CPU info
+CPU_MODEL=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+CPU_CORES=$(nproc)
+CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print 100 - $8}' | cut -d. -f1)
+
+# Memory info
+MEM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
+MEM_USED=$(free -h | awk '/^Mem:/ {print $3}')
+MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
+
+# ZFS info
+if command -v zpool &> /dev/null; then
+    ZFS_POOL=$(zpool list -H -o name 2>/dev/null | head -1)
+    if [ -n "$ZFS_POOL" ]; then
+        ZFS_SIZE=$(zpool list -H -o size "$ZFS_POOL" 2>/dev/null)
+        ZFS_USED=$(zpool list -H -o allocated "$ZFS_POOL" 2>/dev/null)
+        ZFS_FREE=$(zpool list -H -o free "$ZFS_POOL" 2>/dev/null)
+        ZFS_HEALTH=$(zpool list -H -o health "$ZFS_POOL" 2>/dev/null)
+    fi
+fi
+
+# VM/CT counts
+VMS=$(qm list 2>/dev/null | tail -n +2 | wc -l)
+CTS=$(pct list 2>/dev/null | tail -n +2 | wc -l)
+RUNNING_VMS=$(qm list 2>/dev/null | grep running | wc -l)
+RUNNING_CTS=$(pct list 2>/dev/null | grep running | wc -l)
+
+# Network info
+IP_ADDR=$(hostname -I | awk '{print $1}')
+
+echo ""
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║${NC}              ${BLUE}${BOLD}Proxmox VE - ${HOSTNAME}${NC}              ${CYAN}${BOLD}║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BOLD}System:${NC}"
+echo -e "  Kernel:    ${KERNEL}"
+echo -e "  Uptime:    ${UPTIME}"
+echo -e "  Load:      ${LOAD}"
+echo -e "  IP:        ${IP_ADDR}"
+echo ""
+echo -e "${BOLD}Resources:${NC}"
+if [ "$CPU_USAGE" -gt 80 ]; then
+    echo -e "  CPU:       ${RED}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+elif [ "$CPU_USAGE" -gt 50 ]; then
+    echo -e "  CPU:       ${YELLOW}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+else
+    echo -e "  CPU:       ${GREEN}${CPU_USAGE}%${NC} (${CPU_CORES} cores)"
+fi
+
+if [ "$MEM_PERCENT" -gt 80 ]; then
+    echo -e "  Memory:    ${RED}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+elif [ "$MEM_PERCENT" -gt 50 ]; then
+    echo -e "  Memory:    ${YELLOW}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+else
+    echo -e "  Memory:    ${GREEN}${MEM_USED}/${MEM_TOTAL} (${MEM_PERCENT}%)${NC}"
+fi
+
+if [ -n "$ZFS_POOL" ]; then
+    echo ""
+    echo -e "${BOLD}ZFS Pool (${ZFS_POOL}):${NC}"
+    if [ "$ZFS_HEALTH" = "ONLINE" ]; then
+        echo -e "  Health:    ${GREEN}${ZFS_HEALTH}${NC}"
+    else
+        echo -e "  Health:    ${RED}${ZFS_HEALTH}${NC}"
+    fi
+    echo -e "  Used:      ${ZFS_USED} / ${ZFS_SIZE} (Free: ${ZFS_FREE})"
+fi
+
+echo ""
+echo -e "${BOLD}Virtualization:${NC}"
+echo -e "  VMs:       ${VMS} total, ${GREEN}${RUNNING_VMS} running${NC}"
+echo -e "  CTs:       ${CTS} total, ${GREEN}${RUNNING_CTS} running${NC}"
+echo ""
+SCRIPT
+
+            chmod +x /etc/update-motd.d/00-proxmox-info
+
+            # Disable last login message
+            sed -i 's/^#*PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config 2>/dev/null || true
+
+            echo "Custom MOTD configured"
+MOTDEOF
+        print_success "Custom MOTD configured"
     fi
 
     # ==========================================================================
@@ -2389,42 +2621,44 @@ EOF
     # PCI Passthrough Preparation (optional, default: no)
     # ==========================================================================
     if [[ "$ENABLE_PCI_PASSTHROUGH" == "yes" ]]; then
-        {
-            remote_exec_script << 'IOMMUEOF'
-                # Detect CPU vendor
-                if grep -q "GenuineIntel" /proc/cpuinfo; then
-                    IOMMU_PARAM="intel_iommu=on"
-                elif grep -q "AuthenticAMD" /proc/cpuinfo; then
-                    IOMMU_PARAM="amd_iommu=on"
-                else
-                    IOMMU_PARAM="intel_iommu=on"
+        print_info "Configuring PCI passthrough (IOMMU)..."
+        remote_exec_script << 'IOMMUEOF'
+            # Detect CPU vendor
+            if grep -q "GenuineIntel" /proc/cpuinfo; then
+                IOMMU_PARAM="intel_iommu=on"
+            elif grep -q "AuthenticAMD" /proc/cpuinfo; then
+                IOMMU_PARAM="amd_iommu=on"
+            else
+                echo "Unknown CPU vendor, using intel_iommu"
+                IOMMU_PARAM="intel_iommu=on"
+            fi
+
+            # Update GRUB configuration
+            GRUB_FILE="/etc/default/grub"
+            if [ -f "$GRUB_FILE" ]; then
+                # Backup original
+                cp "$GRUB_FILE" "${GRUB_FILE}.bak"
+
+                # Add IOMMU parameters if not present
+                if ! grep -q "iommu=on" "$GRUB_FILE"; then
+                    sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"${IOMMU_PARAM} iommu=pt /" "$GRUB_FILE"
                 fi
 
-                # Update GRUB configuration
-                GRUB_FILE="/etc/default/grub"
-                if [ -f "$GRUB_FILE" ]; then
-                    # Backup original
-                    cp "$GRUB_FILE" "${GRUB_FILE}.bak"
+                # Update GRUB
+                update-grub
+                echo "GRUB updated with IOMMU parameters"
+            fi
 
-                    # Add IOMMU parameters if not present
-                    if ! grep -q "iommu=on" "$GRUB_FILE"; then
-                        sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"${IOMMU_PARAM} iommu=pt /" "$GRUB_FILE"
-                    fi
-
-                    # Update GRUB
-                    update-grub
-                fi
-
-                # Add VFIO modules
-                cat > /etc/modules-load.d/vfio.conf << 'MODULES'
+            # Add VFIO modules
+            cat > /etc/modules-load.d/vfio.conf << 'MODULES'
 vfio
 vfio_iommu_type1
 vfio_pci
 vfio_virqfd
 MODULES
 
-                # Blacklist GPU drivers for passthrough (commented by default)
-                cat > /etc/modprobe.d/pci-passthrough.conf << 'BLACKLIST'
+            # Blacklist GPU drivers for passthrough (commented by default)
+            cat > /etc/modprobe.d/pci-passthrough.conf << 'BLACKLIST'
 # Uncomment to blacklist drivers for GPU passthrough
 # blacklist nouveau
 # blacklist nvidia
@@ -2435,40 +2669,51 @@ MODULES
 # VFIO options
 options vfio-pci ids=
 BLACKLIST
+
+            echo "PCI passthrough prepared. Reboot required to enable IOMMU."
+            echo "To passthrough a device:"
+            echo "1. Find device ID: lspci -nn"
+            echo "2. Add ID to /etc/modprobe.d/pci-passthrough.conf"
+            echo "3. Regenerate initramfs: update-initramfs -u -k all"
 IOMMUEOF
-        } > /dev/null 2>&1 &
-        show_progress $! "Configuring PCI passthrough (IOMMU)"
+        print_success "PCI passthrough prepared (reboot required)"
     fi
 
     # ==========================================================================
     # Let's Encrypt Certificate (optional, default: no)
     # ==========================================================================
     if [[ "$INSTALL_LETSENCRYPT" == "yes" && -n "$LETSENCRYPT_DOMAIN" ]]; then
-        {
-            remote_exec_script << LEEOF
-                export DEBIAN_FRONTEND=noninteractive
+        print_info "Configuring Let's Encrypt for ${LETSENCRYPT_DOMAIN}..."
+        remote_exec_script << LEEOF
+            export DEBIAN_FRONTEND=noninteractive
 
-                # Install pve-acme for Proxmox ACME integration
-                apt-get install -yqq pve-acme 2>/dev/null || true
+            # Install pve-acme for Proxmox ACME integration
+            apt-get install -yqq pve-acme 2>/dev/null || true
 
-                # Register ACME account if not exists
-                if ! pvenode acme account list 2>/dev/null | grep -q "default"; then
-                    pvenode acme account register default --contact "${EMAIL}" --directory https://acme-v02.api.letsencrypt.org/directory
+            # Register ACME account if not exists
+            if ! pvenode acme account list 2>/dev/null | grep -q "default"; then
+                pvenode acme account register default --contact "${EMAIL}" --directory https://acme-v02.api.letsencrypt.org/directory
+                echo "ACME account registered"
+            fi
+
+            # Configure domain for certificate
+            pvenode config set --acme "domains=${LETSENCRYPT_DOMAIN}"
+
+            # Order certificate
+            if pvenode acme cert order 2>/dev/null; then
+                echo "Let's Encrypt certificate obtained for ${LETSENCRYPT_DOMAIN}"
+
+                # Setup auto-renewal cron
+                if ! grep -q "pvenode acme cert renew" /etc/crontab 2>/dev/null; then
+                    echo "0 3 * * * root pvenode acme cert renew --force 2>/dev/null" >> /etc/crontab
+                    echo "Auto-renewal cron job added"
                 fi
-
-                # Configure domain for certificate
-                pvenode config set --acme "domains=${LETSENCRYPT_DOMAIN}"
-
-                # Order certificate
-                if pvenode acme cert order 2>/dev/null; then
-                    # Setup auto-renewal cron
-                    if ! grep -q "pvenode acme cert renew" /etc/crontab 2>/dev/null; then
-                        echo "0 3 * * * root pvenode acme cert renew --force 2>/dev/null" >> /etc/crontab
-                    fi
-                fi
+            else
+                echo "Warning: Could not obtain certificate. Ensure DNS points to this server."
+                echo "Run manually after reboot: pvenode acme cert order"
+            fi
 LEEOF
-        } > /dev/null 2>&1 &
-        show_progress $! "Configuring Let's Encrypt for ${LETSENCRYPT_DOMAIN}"
+        print_success "Let's Encrypt configured for ${LETSENCRYPT_DOMAIN}"
     fi
 
     print_success "Optional features configuration complete"
@@ -2515,67 +2760,64 @@ configure_proxmox_via_ssh() {
 # Finish and reboot
 # =============================================================================
 
-# Function to reboot into the main OS
-reboot_to_main_os() {
+# Calculate and display total installation time
+show_total_time() {
     local end_time=$(date +%s)
     local total_seconds=$((end_time - INSTALL_START_TIME))
     local duration=$(format_duration $total_seconds)
-
-    echo ""
-    echo -e "${CLR_CYAN}"
-    cat << 'COMPLETE'
-  ___           _        _ _       _   _               ____                      _      _
- |_ _|_ __  ___| |_ __ _| | | __ _| |_(_) ___  _ __   / ___|___  _ __ ___  _ __ | | ___| |_ ___
-  | || '_ \/ __| __/ _` | | |/ _` | __| |/ _ \| '_ \ | |   / _ \| '_ ` _ \| '_ \| |/ _ \ __/ _ \
-  | || | | \__ \ || (_| | | | (_| | |_| | (_) | | | || |__| (_) | | | | | | |_) | |  __/ ||  __/
- |___|_| |_|___/\__\__,_|_|_|\__,_|\__|_|\___/|_| |_| \____\___/|_| |_| |_| .__/|_|\___|\__\___|
-                                                                          |_|
-COMPLETE
-    echo -e "${CLR_RESET}"
     print_success "Total installation time: ${duration}"
+}
+
+# Function to reboot into the main OS
+reboot_to_main_os() {
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
+    echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    show_total_time
     echo ""
-
-    # Build summary content
-    local summary=""
-    summary+="Security:\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} SSH key deployed, password auth disabled\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} CPU governor: performance\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} Kernel optimized for virtualization\n"
-    summary+="\n"
-    summary+="Installed:\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} btop, iotop, ncdu, tmux, pigz, jq, bat\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} libguestfs-tools, smartmontools\n"
-    summary+="  ${CLR_GREEN}✓${CLR_RESET} ZSH with autosuggestions\n"
+    echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
+    echo "  ✓ SSH public key deployed"
+    echo "  ✓ Password authentication DISABLED"
+    echo "  ✓ CPU governor set to performance"
+    echo "  ✓ Kernel parameters optimized for virtualization"
+    echo "  ✓ Subscription notice removed"
+    echo ""
+    echo -e "${CLR_YELLOW}Post-Installation Optimizations:${CLR_RESET}"
+    echo "  ✓ Monitoring utilities: btop, iotop, ncdu, tmux, pigz, smartmontools, jq, bat"
+    echo "  ✓ VM image tools: libguestfs-tools"
+    echo "  ✓ ZFS ARC memory limits configured"
+    echo "  ✓ nf_conntrack optimized for high connection counts"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        if [[ -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-            summary+="  ${CLR_GREEN}✓${CLR_RESET} Tailscale (${TAILSCALE_IP})\n"
+        echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
+        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+            echo "  ✓ Tailscale authenticated (IP: ${TAILSCALE_IP:-pending})"
         else
-            summary+="  ${CLR_YELLOW}⚠${CLR_RESET} Tailscale (needs: tailscale up --ssh)\n"
+            echo "  ⚠ Tailscale needs authentication after reboot:"
+            echo "      tailscale up --ssh"
+            echo "      tailscale serve --bg --https=443 https://127.0.0.1:8006"
         fi
     fi
-    summary+="\n"
-    summary+="Access:\n"
-    summary+="  Web UI:  https://${MAIN_IPV4_CIDR%/*}:8006\n"
-    summary+="  SSH:     ssh root@${MAIN_IPV4_CIDR%/*}"
+    echo ""
+    echo -e "${CLR_YELLOW}Access Information:${CLR_RESET}"
+    echo "  Web UI:    https://${MAIN_IPV4_CIDR%/*}:8006"
+    echo "  SSH:       ssh root@${MAIN_IPV4_CIDR%/*}"
     if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        summary+="\n  TS SSH:  ssh root@${TAILSCALE_IP}"
+        echo "  Tailscale SSH: ssh root@${TAILSCALE_IP}"
         if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-            summary+="\n  TS Web:  https://${TAILSCALE_HOSTNAME}"
+            echo "  Tailscale Web UI: https://${TAILSCALE_HOSTNAME}"
         else
-            summary+="\n  TS Web:  https://${TAILSCALE_IP}:8006"
+            echo "  Tailscale Web UI: https://${TAILSCALE_IP}:8006"
         fi
     fi
-
-    echo -e "$summary"
     echo ""
 
     # Ask user to reboot the system
-    read -e -p "Reboot now? (y/n): " -i "y" REBOOT
+    read -e -p "Do you want to reboot the system? (y/n): " -i "y" REBOOT
     if [[ "$REBOOT" == "y" ]]; then
-        print_info "Rebooting..."
+        print_info "Rebooting the system..."
         reboot
     else
-        print_info "Exiting without reboot"
+        print_info "Exiting..."
         exit 0
     fi
 }
