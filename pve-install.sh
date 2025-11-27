@@ -402,16 +402,14 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+        echo -n "Enter your private subnet [10.0.0.0/24]: "
+        read PRIVATE_SUBNET
+        PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
         if validate_subnet "$PRIVATE_SUBNET"; then
             break
         fi
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
-
-    # Clear any remaining input in the buffer before reading password
-    # This fixes the issue where Enter from previous read -e remains in buffer
-    read -t 0.01 -n 10000 2>/dev/null || true
 
     # Read password with asterisks displayed
     NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
@@ -431,7 +429,6 @@ get_system_inputs() {
         NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
     done
 
-    echo ""
     echo "Private subnet: $PRIVATE_SUBNET"
     echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
