@@ -69,6 +69,18 @@ remote_exec_script() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s'
 }
 
+# Execute remote script with progress indicator (hides output, shows spinner)
+remote_exec_with_progress() {
+    local message="$1"
+    local script="$2"
+
+    echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
+    local pid=$!
+    show_progress $pid "$message"
+    wait $pid
+    return $?
+}
+
 remote_copy() {
     local src="$1"
     local dst="$2"

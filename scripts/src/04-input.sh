@@ -2,6 +2,26 @@
 # User input functions
 # =============================================================================
 
+# Helper to prompt or use existing value
+prompt_or_default() {
+    local prompt="$1"
+    local default="$2"
+    local var_name="$3"
+    local current_value="${!var_name}"
+
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        if [[ -n "$current_value" ]]; then
+            echo "$current_value"
+        else
+            echo "$default"
+        fi
+    else
+        local result
+        read -e -p "$prompt" -i "${current_value:-$default}" result
+        echo "$result"
+    fi
+}
+
 get_system_inputs() {
     # Get default interface name (the one with default route)
     CURRENT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
@@ -48,8 +68,10 @@ get_system_inputs() {
     fi
 
     # Prompt user for interface name
-    echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
-    read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
+    if [[ "$NON_INTERACTIVE" != true ]]; then
+        echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
+        read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
+    fi
 
     # Get network information from the CURRENT interface (the one active in Rescue)
     # but use INTERFACE_NAME (predictable name) for the Proxmox configuration
@@ -79,143 +101,181 @@ get_system_inputs() {
     echo "IPv6: $MAIN_IPV6"
 
     # Get user input for other configuration with validation
-    while true; do
-        read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "pve" HOSTNAME
-        if validate_hostname "$HOSTNAME"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
-    done
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # Use defaults or config values in non-interactive mode
+        HOSTNAME="${HOSTNAME:-pve}"
+        DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
+        TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
+        EMAIL="${EMAIL:-admin@example.com}"
+        PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
+    else
+        while true; do
+            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${HOSTNAME:-pve}" HOSTNAME
+            if validate_hostname "$HOSTNAME"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
+        done
 
-    # Domain suffix for FQDN (hostname.domain)
-    read -e -p "Enter domain suffix: " -i "local" DOMAIN_SUFFIX
+        read -e -p "Enter domain suffix: " -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
+
+        while true; do
+            read -e -p "Enter your timezone : " -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
+            if validate_timezone "$TIMEZONE"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
+        done
+
+        while true; do
+            read -e -p "Enter your email address: " -i "${EMAIL:-admin@example.com}" EMAIL
+            if validate_email "$EMAIL"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
+        done
+
+        while true; do
+            read -e -p "Enter your private subnet: " -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
+            if validate_subnet "$PRIVATE_SUBNET"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+        done
+    fi
+
     FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
     echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
-    while true; do
-        read -e -p "Enter your timezone : " -i "Europe/Kyiv" TIMEZONE
-        if validate_timezone "$TIMEZONE"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
-    done
-
-    while true; do
-        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
-        if validate_email "$EMAIL"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
-    done
-
-    while true; do
-        read -e -p "Enter your private subnet: " -i "10.0.0.0/24" PRIVATE_SUBNET
-        if validate_subnet "$PRIVATE_SUBNET"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-    done
-
-    # Read password with asterisks displayed
-    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
-
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
-    # Append .1 to get the first IP in the subnet
     PRIVATE_IP="${PRIVATE_CIDR}.1"
-    # Get the subnet mask length
     SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
-    # Create the full CIDR notation for the first IP
     PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
 
-    # Check password was not empty, do it in loop until password is not empty
-    while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-        echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
-    done
+    # Password handling
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+    else
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
+                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+                NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+            done
+        fi
+    fi
 
     echo "Private subnet: $PRIVATE_SUBNET"
     echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
     # SSH Public Key (required for hardened SSH config)
-    echo ""
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
-    echo ""
-
-    # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
-    SSH_PUBLIC_KEY=""
-    if [[ -f /root/.ssh/authorized_keys ]]; then
-        # Read all valid SSH keys from authorized_keys (skip comments and empty lines)
-        SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-    fi
-
-    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-        echo -e "${CLR_GREEN}Found SSH public key from Rescue System:${CLR_RESET}"
-        echo "${SSH_PUBLIC_KEY:0:50}..."
-        echo ""
-        read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
-        if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
-            SSH_PUBLIC_KEY=""
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # In non-interactive mode, SSH_PUBLIC_KEY must be set in config
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            # Try to get from rescue system
+            if [[ -f /root/.ssh/authorized_keys ]]; then
+                SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+            fi
         fi
-    fi
-
-    # If no key found or user declined, ask for manual input
-    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-        echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
-        echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+    else
         echo ""
-        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
+        echo ""
 
-        while [[ -z "$SSH_PUBLIC_KEY" ]]; do
-            echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+        # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
+        if [[ -z "$SSH_PUBLIC_KEY" && -f /root/.ssh/authorized_keys ]]; then
+            SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+        fi
+
+        if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            echo -e "${CLR_GREEN}Found SSH public key:${CLR_RESET}"
+            echo "${SSH_PUBLIC_KEY:0:50}..."
+            echo ""
+            read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
+            if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
+                SSH_PUBLIC_KEY=""
+            fi
+        fi
+
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
+            echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+            echo ""
             read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
-        done
 
-        # Validate SSH key format
-        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
-            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+            while [[ -z "$SSH_PUBLIC_KEY" ]]; do
+                echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+                read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+            done
+
+            if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
+                echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+            fi
         fi
-    fi
 
-    echo -e "${CLR_GREEN}SSH key configured.${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+    fi
 
     # Tailscale VPN Configuration (Optional)
-    echo ""
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo "Tailscale provides secure remote access to your Proxmox server."
-    echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
-    echo ""
-    read -e -p "Install Tailscale? (y/n): " -i "y" INSTALL_TAILSCALE
-
-    if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
-        INSTALL_TAILSCALE="yes"
-        echo ""
-        echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
-        echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
-        echo ""
-        read -e -p "Tailscale Auth Key (leave empty for manual auth): " TAILSCALE_AUTH_KEY
-
-        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            echo -e "${CLR_GREEN}Auth key provided. Tailscale will be configured automatically.${CLR_RESET}"
-        else
-            echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # Use config values, default to no if not set
+        INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
+        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
         fi
-
-        # Enable both SSH and Web UI by default
-        TAILSCALE_SSH="yes"
-        TAILSCALE_WEBUI="yes"
-        echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
-        echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
     else
-        INSTALL_TAILSCALE="no"
-        TAILSCALE_AUTH_KEY=""
-        TAILSCALE_SSH="no"
-        TAILSCALE_WEBUI="no"
-        echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+        echo ""
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo "Tailscale provides secure remote access to your Proxmox server."
+        echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
+        echo ""
+        read -e -p "Install Tailscale? (y/n): " -i "${INSTALL_TAILSCALE:-y}" INSTALL_TAILSCALE
+
+        if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
+            INSTALL_TAILSCALE="yes"
+            echo ""
+            echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
+            echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
+            echo ""
+            read -e -p "Tailscale Auth Key (leave empty for manual auth): " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓ Auth key provided. Tailscale will be configured automatically${CLR_RESET}"
+            else
+                echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+            fi
+
+            TAILSCALE_SSH="yes"
+            TAILSCALE_WEBUI="yes"
+            echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
+            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
+        else
+            INSTALL_TAILSCALE="no"
+            TAILSCALE_AUTH_KEY=""
+            TAILSCALE_SSH="no"
+            TAILSCALE_WEBUI="no"
+            echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+        fi
+    fi
+
+    # Save config if requested
+    if [[ -n "$SAVE_CONFIG" ]]; then
+        save_config "$SAVE_CONFIG"
     fi
 }

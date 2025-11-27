@@ -34,7 +34,7 @@ make_template_files() {
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
-    echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
 }
 
 # Configure the installed Proxmox via SSH
@@ -107,39 +107,26 @@ ZFSEOF
 REPOEOF
 
     # Update all system packages
-    echo -e "${CLR_YELLOW}Updating system packages...${CLR_RESET}"
-    remote_exec_script << 'UPDATEEOF'
+    remote_exec_with_progress "Updating system packages" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get dist-upgrade -yqq
         apt-get autoremove -yqq
         apt-get clean
-
-        # Proxmox-specific updates
         pveupgrade 2>/dev/null || true
         pveam update 2>/dev/null || true
-
-        echo "System packages updated"
-UPDATEEOF
+    '
 
     # Install monitoring and system utilities
-    echo -e "${CLR_YELLOW}Installing monitoring and system utilities...${CLR_RESET}"
-    remote_exec_script << 'UTILSEOF'
+    remote_exec_with_progress "Installing monitoring utilities" '
         export DEBIAN_FRONTEND=noninteractive
-
-        # Install monitoring & system utilities
         apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
-            echo "Some packages may not be available, installing what we can..."
             for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
-                apt-get install -yqq "$pkg" 2>/dev/null || echo "Package $pkg not available"
+                apt-get install -yqq "$pkg" 2>/dev/null || true
             done
         }
-
-        # Optional: for VM image manipulation
-        apt-get install -yqq libguestfs-tools 2>/dev/null || echo "libguestfs-tools not available"
-
-        echo "Monitoring utilities installed"
-UTILSEOF
+        apt-get install -yqq libguestfs-tools 2>/dev/null || true
+    '
 
     # Configure nf_conntrack
     echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
@@ -159,25 +146,15 @@ UTILSEOF
 CONNTRACKEOF
 
     # Configure CPU governor
-    echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
-    remote_exec_script << 'CPUEOF'
-        # Install cpufrequtils for CPU governor management (will work on bare metal after reboot)
-        # Note: enterprise repos already disabled above, so apt update should work without 401 errors
+    remote_exec_with_progress "Configuring CPU governor" '
         apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || true
-
-        # Set performance governor as default - this config will be applied on boot
-        echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
-
-        # Try to apply immediately (only works if cpufreq is available, not in QEMU)
+        echo "GOVERNOR=\"performance\"" > /etc/default/cpufrequtils
         if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
             for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
                 [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true
             done
-            echo "CPU governor set to performance (applied immediately)"
-        else
-            echo "CPU governor configured for performance (will apply after reboot on bare metal)"
         fi
-CPUEOF
+    '
 
     # Remove Proxmox subscription notice
     echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
@@ -225,21 +202,14 @@ CEPHEOF
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        echo -e "${CLR_YELLOW}Installing Tailscale VPN...${CLR_RESET}"
-        remote_exec_script << 'TAILSCALEEOF'
-            # Add Tailscale repository and install
+        remote_exec_with_progress "Installing Tailscale VPN" '
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
-
             apt-get update -qq
             apt-get install -yqq tailscale
-
-            # Enable and start tailscaled service
             systemctl enable tailscaled
             systemctl start tailscaled
-
-            echo "Tailscale installed successfully"
-TAILSCALEEOF
+        '
 
         # Build tailscale up command with selected options
         TAILSCALE_UP_CMD="tailscale up"
@@ -258,13 +228,13 @@ TAILSCALEEOF
             # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
             TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                echo -e "${CLR_GREEN}Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+                echo -e "${CLR_GREEN}✓ Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -284,7 +254,7 @@ TAILSCALEEOF
     remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
     remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    echo -e "${CLR_GREEN}Security hardening configured${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Security hardening configured${CLR_RESET}"
 
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
@@ -293,5 +263,5 @@ TAILSCALEEOF
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
-    echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ QEMU process exited${CLR_RESET}"
 }

@@ -4,7 +4,7 @@
   <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/proxmox.png" alt="Proxmox" height="64" />
   <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/hetzner.png" alt="Hetzner" height="50" />
   <h3>Automated Installation for Hetzner Dedicated Servers</h3>
-  
+
   ![GitHub Stars](https://img.shields.io/github/stars/payk24/proxmox-hetzner.svg)
   ![GitHub Watchers](https://img.shields.io/github/watchers/payk24/proxmox-hetzner.svg)
   ![GitHub Forks](https://img.shields.io/github/forks/payk24/proxmox-hetzner.svg)
@@ -13,6 +13,15 @@
 ## 📑 Overview
 
 This project provides an automated solution for installing Proxmox VE on Hetzner dedicated servers **without requiring console access**. It streamlines the installation process using a custom script that handles all the complex configuration steps automatically.
+
+### Features
+
+- Clean progress indicators with spinners for all operations
+- Full logging to file for troubleshooting
+- Pre-flight hardware and connectivity checks
+- Configuration file support for repeatable installations
+- Non-interactive mode for fully automated deployments
+- Total installation time tracking
 
 **Compatible Hetzner Server Series:**
 - [AX Series](https://www.hetzner.com/dedicated-rootserver/matrix-ax)
@@ -56,6 +65,32 @@ Execute this single command in the rescue system terminal:
 
 ```bash
 bash <(curl -sSL https://github.com/payk24/proxmox-hetzner/raw/main/pve-install.sh)
+```
+
+#### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Show help message |
+| `-v, --version` | Show version |
+| `-c, --config FILE` | Load configuration from file |
+| `-s, --save-config FILE` | Save configuration to file after input |
+| `-n, --non-interactive` | Run without prompts (requires `--config`) |
+
+#### Usage Examples
+
+```bash
+# Interactive installation (default)
+bash pve-install.sh
+
+# Save config for future use
+bash pve-install.sh -s proxmox.conf
+
+# Load config, prompt for missing values
+bash pve-install.sh -c proxmox.conf
+
+# Fully automated installation
+bash pve-install.sh -c proxmox.conf -n
 ```
 
 The script will:

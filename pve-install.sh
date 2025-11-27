@@ -29,9 +29,173 @@ CLR_RED="\033[1;31m"
 CLR_GREEN="\033[1;32m"
 CLR_YELLOW="\033[1;33m"
 CLR_BLUE="\033[1;34m"
+CLR_CYAN="\033[1;36m"
 CLR_RESET="\033[m"
 
+# Version
+VERSION="1.2.0"
+
+# Log file
+LOG_FILE="/root/pve-install-$(date +%Y%m%d-%H%M%S).log"
+
+# Start time for total duration tracking
+INSTALL_START_TIME=$(date +%s)
+
+# Default values
+NON_INTERACTIVE=false
+CONFIG_FILE=""
+SAVE_CONFIG=""
+
+# =============================================================================
+# Command line argument parsing
+# =============================================================================
+show_help() {
+    cat << EOF
+Proxmox VE Automated Installer for Hetzner v${VERSION}
+
+Usage: $0 [OPTIONS]
+
+Options:
+  -h, --help              Show this help message
+  -c, --config FILE       Load configuration from file
+  -s, --save-config FILE  Save configuration to file after input
+  -n, --non-interactive   Run without prompts (requires --config)
+  -v, --version           Show version
+
+Examples:
+  $0                           # Interactive installation
+  $0 -s proxmox.conf           # Interactive, save config for later
+  $0 -c proxmox.conf           # Load config, prompt for missing values
+  $0 -c proxmox.conf -n        # Fully automated installation
+
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            ;;
+        -v|--version)
+            echo "Proxmox Installer v${VERSION}"
+            exit 0
+            ;;
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -s|--save-config)
+            SAVE_CONFIG="$2"
+            shift 2
+            ;;
+        -n|--non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate non-interactive mode requires config
+if [[ "$NON_INTERACTIVE" == true && -z "$CONFIG_FILE" ]]; then
+    echo -e "${CLR_RED}Error: --non-interactive requires --config FILE${CLR_RESET}"
+    exit 1
+fi
+
+# =============================================================================
+# Config file functions
+# =============================================================================
+load_config() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        echo -e "${CLR_GREEN}✓ Loading configuration from: $file${CLR_RESET}"
+        source "$file"
+        return 0
+    else
+        echo -e "${CLR_RED}Config file not found: $file${CLR_RESET}"
+        return 1
+    fi
+}
+
+save_config() {
+    local file="$1"
+    cat > "$file" << EOF
+# Proxmox Installer Configuration
+# Generated: $(date)
+
+# Network
+INTERFACE_NAME="${INTERFACE_NAME}"
+
+# System
+HOSTNAME="${HOSTNAME}"
+DOMAIN_SUFFIX="${DOMAIN_SUFFIX}"
+TIMEZONE="${TIMEZONE}"
+EMAIL="${EMAIL}"
+PRIVATE_SUBNET="${PRIVATE_SUBNET}"
+
+# Password (consider using environment variable instead)
+NEW_ROOT_PASSWORD="${NEW_ROOT_PASSWORD}"
+
+# SSH
+SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY}"
+
+# Tailscale
+INSTALL_TAILSCALE="${INSTALL_TAILSCALE}"
+TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY}"
+TAILSCALE_SSH="${TAILSCALE_SSH}"
+TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
+
+# RAID mode (auto-detected, but can be overridden)
+# RAID_MODE="${RAID_MODE}"
+EOF
+    chmod 600 "$file"
+    echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"
+}
+
+# Load config if specified
+if [[ -n "$CONFIG_FILE" ]]; then
+    load_config "$CONFIG_FILE" || exit 1
+fi
+
+# =============================================================================
+# Logging setup
+# =============================================================================
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
 clear
+
+# =============================================================================
+# ASCII Banner
+# =============================================================================
+echo -e "${CLR_CYAN}"
+cat << 'BANNER'
+  ____
+ |  _ \ _ __ _____  ___ __ ___   _____  __
+ | |_) | '__/ _ \ \/ / '_ ` _ \ / _ \ \/ /
+ |  __/| | | (_) >  <| | | | | | (_) >  <
+ |_|   |_|  \___/_/\_\_| |_| |_|\___/_/\_\
+
+    Hetzner Automated Installer
+BANNER
+echo -e "${CLR_RESET}"
+echo -e "${CLR_YELLOW}Version: ${VERSION}${CLR_RESET}"
+echo -e "${CLR_YELLOW}Log file: ${LOG_FILE}${CLR_RESET}"
+if [[ -n "$CONFIG_FILE" ]]; then
+    echo -e "${CLR_YELLOW}Config: ${CONFIG_FILE}${CLR_RESET}"
+fi
+if [[ "$NON_INTERACTIVE" == true ]]; then
+    echo -e "${CLR_YELLOW}Mode: Non-interactive${CLR_RESET}"
+fi
+echo ""
 
 # --- 01-helpers.sh ---
 # =============================================================================
@@ -103,6 +267,18 @@ remote_exec() {
 
 remote_exec_script() {
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s'
+}
+
+# Execute remote script with progress indicator (hides output, shows spinner)
+remote_exec_with_progress() {
+    local message="$1"
+    local script="$2"
+
+    echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
+    local pid=$!
+    show_progress $pid "$message"
+    wait $pid
+    return $?
 }
 
 remote_copy() {
@@ -183,6 +359,85 @@ wait_with_progress() {
 
 # --- 02-validation.sh ---
 # =============================================================================
+# Pre-flight checks
+# =============================================================================
+
+preflight_checks() {
+    echo -e "${CLR_BLUE}Running pre-flight checks...${CLR_RESET}"
+    local errors=0
+
+    # Check if running as root
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${CLR_RED}✗ Must run as root${CLR_RESET}"
+        errors=$((errors + 1))
+    else
+        echo -e "${CLR_GREEN}✓ Running as root${CLR_RESET}"
+    fi
+
+    # Check internet connectivity
+    if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
+        echo -e "${CLR_GREEN}✓ Internet connection available${CLR_RESET}"
+    else
+        echo -e "${CLR_RED}✗ No internet connection${CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Check available disk space (need at least 5GB in /root)
+    local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
+    if [[ $free_space_mb -ge 5000 ]]; then
+        echo -e "${CLR_GREEN}✓ Disk space: ${free_space_mb}MB available${CLR_RESET}"
+    else
+        echo -e "${CLR_RED}✗ Insufficient disk space: ${free_space_mb}MB (need 5GB+)${CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Check RAM (need at least 4GB)
+    local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    if [[ $total_ram_mb -ge 4000 ]]; then
+        echo -e "${CLR_GREEN}✓ RAM: ${total_ram_mb}MB available${CLR_RESET}"
+    else
+        echo -e "${CLR_RED}✗ Insufficient RAM: ${total_ram_mb}MB (need 4GB+)${CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Check CPU cores
+    local cpu_cores=$(nproc)
+    if [[ $cpu_cores -ge 2 ]]; then
+        echo -e "${CLR_GREEN}✓ CPU: ${cpu_cores} cores${CLR_RESET}"
+    else
+        echo -e "${CLR_YELLOW}⚠ CPU: ${cpu_cores} core(s) - minimum 2 recommended${CLR_RESET}"
+    fi
+
+    # Check if KVM is available
+    if [[ -e /dev/kvm ]]; then
+        echo -e "${CLR_GREEN}✓ KVM virtualization available${CLR_RESET}"
+    else
+        echo -e "${CLR_RED}✗ KVM not available (required for installation)${CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Check required commands
+    for cmd in curl wget ip; do
+        if command -v $cmd > /dev/null 2>&1; then
+            echo -e "${CLR_GREEN}✓ Command '$cmd' available${CLR_RESET}"
+        else
+            echo -e "${CLR_RED}✗ Command '$cmd' not found${CLR_RESET}"
+            errors=$((errors + 1))
+        fi
+    done
+
+    echo ""
+
+    if [[ $errors -gt 0 ]]; then
+        echo -e "${CLR_RED}Pre-flight checks failed with $errors error(s). Exiting.${CLR_RESET}"
+        exit 1
+    fi
+
+    echo -e "${CLR_GREEN}✓ All pre-flight checks passed!${CLR_RESET}"
+    echo ""
+}
+
+# =============================================================================
 # Input validation functions
 # =============================================================================
 
@@ -256,47 +511,66 @@ validate_timezone() {
 # =============================================================================
 
 detect_nvme_drives() {
-    echo -e "${CLR_BLUE}Detecting NVMe drives...${CLR_RESET}"
-
     # Find all NVMe drives (excluding partitions)
     NVME_DRIVES=($(lsblk -d -n -o NAME,TYPE | grep nvme | grep disk | awk '{print "/dev/"$1}' | sort))
 
     if [ ${#NVME_DRIVES[@]} -eq 0 ]; then
-        echo -e "${CLR_RED}No NVMe drives detected! Exiting.${CLR_RESET}"
+        echo -e "${CLR_RED}✗ No NVMe drives detected! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    echo -e "${CLR_GREEN}Detected ${#NVME_DRIVES[@]} NVMe drive(s):${CLR_RESET}"
+    echo -e "${CLR_BLUE}┌─────────────────────────────────────────┐${CLR_RESET}"
+    echo -e "${CLR_BLUE}│  Storage Configuration                  │${CLR_RESET}"
+    echo -e "${CLR_BLUE}├─────────────────────────────────────────┤${CLR_RESET}"
+
     for drive in "${NVME_DRIVES[@]}"; do
-        local size=$(lsblk -d -n -o SIZE "$drive")
-        echo "  - $drive ($size)"
+        local size=$(lsblk -d -n -o SIZE "$drive" | xargs)
+        local model=$(lsblk -d -n -o MODEL "$drive" 2>/dev/null | xargs || echo "NVMe")
+        printf "${CLR_BLUE}│${CLR_RESET}  %-8s  %6s  %-18s ${CLR_BLUE}│${CLR_RESET}\n" "$(basename $drive)" "$size" "$model"
     done
 
+    echo -e "${CLR_BLUE}├─────────────────────────────────────────┤${CLR_RESET}"
+
     if [ ${#NVME_DRIVES[@]} -lt 2 ]; then
-        echo -e "${CLR_YELLOW}Warning: Only ${#NVME_DRIVES[@]} NVMe drive detected. RAID-1 requires 2 drives.${CLR_RESET}"
-        echo -e "${CLR_YELLOW}Installation will proceed with single drive (no RAID).${CLR_RESET}"
+        echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_YELLOW}Mode: Single Drive (no RAID)${CLR_RESET}           ${CLR_BLUE}│${CLR_RESET}"
         RAID_MODE="single"
     else
+        echo -e "${CLR_BLUE}│${CLR_RESET}  ${CLR_GREEN}Mode: ZFS RAID-1 (mirror)${CLR_RESET}              ${CLR_BLUE}│${CLR_RESET}"
         RAID_MODE="raid1"
     fi
+
+    echo -e "${CLR_BLUE}└─────────────────────────────────────────┘${CLR_RESET}"
+    echo ""
 
     # Set drive variables for QEMU
     NVME_DRIVE_1="${NVME_DRIVES[0]}"
     NVME_DRIVE_2="${NVME_DRIVES[1]:-}"
 }
 
-# Ensure the script is run as root
-if [[ $EUID != 0 ]]; then
-    echo -e "${CLR_RED}Please run this script as root.${CLR_RESET}"
-    exit 1
-fi
-
-echo -e "${CLR_GREEN}Starting Proxmox auto-installation...${CLR_RESET}"
-
 # --- 04-input.sh ---
 # =============================================================================
 # User input functions
 # =============================================================================
+
+# Helper to prompt or use existing value
+prompt_or_default() {
+    local prompt="$1"
+    local default="$2"
+    local var_name="$3"
+    local current_value="${!var_name}"
+
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        if [[ -n "$current_value" ]]; then
+            echo "$current_value"
+        else
+            echo "$default"
+        fi
+    else
+        local result
+        read -e -p "$prompt" -i "${current_value:-$default}" result
+        echo "$result"
+    fi
+}
 
 get_system_inputs() {
     # Get default interface name (the one with default route)
@@ -344,8 +618,10 @@ get_system_inputs() {
     fi
 
     # Prompt user for interface name
-    echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
-    read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
+    if [[ "$NON_INTERACTIVE" != true ]]; then
+        echo -e "${CLR_YELLOW}NOTE: Use the predictable name (enp*, eno*) for bare metal, not eth0${CLR_RESET}"
+        read -e -p "Interface name (options are: ${AVAILABLE_ALTNAMES}) : " -i "$INTERFACE_NAME" INTERFACE_NAME
+    fi
 
     # Get network information from the CURRENT interface (the one active in Rescue)
     # but use INTERFACE_NAME (predictable name) for the Proxmox configuration
@@ -375,144 +651,182 @@ get_system_inputs() {
     echo "IPv6: $MAIN_IPV6"
 
     # Get user input for other configuration with validation
-    while true; do
-        read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "pve" HOSTNAME
-        if validate_hostname "$HOSTNAME"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
-    done
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # Use defaults or config values in non-interactive mode
+        HOSTNAME="${HOSTNAME:-pve}"
+        DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
+        TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
+        EMAIL="${EMAIL:-admin@example.com}"
+        PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
+    else
+        while true; do
+            read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "${HOSTNAME:-pve}" HOSTNAME
+            if validate_hostname "$HOSTNAME"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
+        done
 
-    # Domain suffix for FQDN (hostname.domain)
-    read -e -p "Enter domain suffix: " -i "local" DOMAIN_SUFFIX
+        read -e -p "Enter domain suffix: " -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
+
+        while true; do
+            read -e -p "Enter your timezone : " -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
+            if validate_timezone "$TIMEZONE"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
+        done
+
+        while true; do
+            read -e -p "Enter your email address: " -i "${EMAIL:-admin@example.com}" EMAIL
+            if validate_email "$EMAIL"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
+        done
+
+        while true; do
+            read -e -p "Enter your private subnet: " -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
+            if validate_subnet "$PRIVATE_SUBNET"; then
+                break
+            fi
+            echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+        done
+    fi
+
     FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
     echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
-    while true; do
-        read -e -p "Enter your timezone : " -i "Europe/Kyiv" TIMEZONE
-        if validate_timezone "$TIMEZONE"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
-    done
-
-    while true; do
-        read -e -p "Enter your email address: " -i "admin@example.com" EMAIL
-        if validate_email "$EMAIL"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
-    done
-
-    while true; do
-        read -e -p "Enter your private subnet: " -i "10.0.0.0/24" PRIVATE_SUBNET
-        if validate_subnet "$PRIVATE_SUBNET"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-    done
-
-    # Read password with asterisks displayed
-    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
-
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
-    # Append .1 to get the first IP in the subnet
     PRIVATE_IP="${PRIVATE_CIDR}.1"
-    # Get the subnet mask length
     SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
-    # Create the full CIDR notation for the first IP
     PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
 
-    # Check password was not empty, do it in loop until password is not empty
-    while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-        echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
-    done
+    # Password handling
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+    else
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
+                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+                NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
+            done
+        fi
+    fi
 
     echo "Private subnet: $PRIVATE_SUBNET"
     echo "First IP in subnet (CIDR): $PRIVATE_IP_CIDR"
 
     # SSH Public Key (required for hardened SSH config)
-    echo ""
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
-    echo ""
-
-    # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
-    SSH_PUBLIC_KEY=""
-    if [[ -f /root/.ssh/authorized_keys ]]; then
-        # Read all valid SSH keys from authorized_keys (skip comments and empty lines)
-        SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-    fi
-
-    if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-        echo -e "${CLR_GREEN}Found SSH public key from Rescue System:${CLR_RESET}"
-        echo "${SSH_PUBLIC_KEY:0:50}..."
-        echo ""
-        read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
-        if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
-            SSH_PUBLIC_KEY=""
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # In non-interactive mode, SSH_PUBLIC_KEY must be set in config
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            # Try to get from rescue system
+            if [[ -f /root/.ssh/authorized_keys ]]; then
+                SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+            fi
         fi
-    fi
-
-    # If no key found or user declined, ask for manual input
-    if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-        echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
-        echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+    else
         echo ""
-        read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_YELLOW}  SSH Public Key Configuration${CLR_RESET}"
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_RED}Password authentication will be DISABLED!${CLR_RESET}"
+        echo ""
 
-        while [[ -z "$SSH_PUBLIC_KEY" ]]; do
-            echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+        # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
+        if [[ -z "$SSH_PUBLIC_KEY" && -f /root/.ssh/authorized_keys ]]; then
+            SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+        fi
+
+        if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            echo -e "${CLR_GREEN}Found SSH public key:${CLR_RESET}"
+            echo "${SSH_PUBLIC_KEY:0:50}..."
+            echo ""
+            read -e -p "Use this key? (y/n): " -i "y" USE_RESCUE_KEY
+            if [[ ! "$USE_RESCUE_KEY" =~ ^[Yy]$ ]]; then
+                SSH_PUBLIC_KEY=""
+            fi
+        fi
+
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            echo "Paste your SSH public key (usually from ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub):"
+            echo "Example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@hostname"
+            echo ""
             read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
-        done
 
-        # Validate SSH key format
-        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
-            echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+            while [[ -z "$SSH_PUBLIC_KEY" ]]; do
+                echo -e "${CLR_RED}SSH public key is required for secure access!${CLR_RESET}"
+                read -e -p "SSH Public Key: " SSH_PUBLIC_KEY
+            done
+
+            if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519|ecdsa)[[:space:]] ]]; then
+                echo -e "${CLR_YELLOW}Warning: SSH key format may be invalid. Continuing anyway...${CLR_RESET}"
+            fi
         fi
-    fi
 
-    echo -e "${CLR_GREEN}SSH key configured.${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ SSH key configured${CLR_RESET}"
+    fi
 
     # Tailscale VPN Configuration (Optional)
-    echo ""
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
-    echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
-    echo "Tailscale provides secure remote access to your Proxmox server."
-    echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
-    echo ""
-    read -e -p "Install Tailscale? (y/n): " -i "y" INSTALL_TAILSCALE
-
-    if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
-        INSTALL_TAILSCALE="yes"
-        echo ""
-        echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
-        echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
-        echo ""
-        read -e -p "Tailscale Auth Key (leave empty for manual auth): " TAILSCALE_AUTH_KEY
-
-        if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            echo -e "${CLR_GREEN}Auth key provided. Tailscale will be configured automatically.${CLR_RESET}"
-        else
-            echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        # Use config values, default to no if not set
+        INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
+        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
         fi
-
-        # Enable both SSH and Web UI by default
-        TAILSCALE_SSH="yes"
-        TAILSCALE_WEBUI="yes"
-        echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
-        echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
     else
-        INSTALL_TAILSCALE="no"
-        TAILSCALE_AUTH_KEY=""
-        TAILSCALE_SSH="no"
-        TAILSCALE_WEBUI="no"
-        echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+        echo ""
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo -e "${CLR_YELLOW}  Tailscale VPN Configuration (Optional)${CLR_RESET}"
+        echo -e "${CLR_YELLOW}============================================${CLR_RESET}"
+        echo "Tailscale provides secure remote access to your Proxmox server."
+        echo "You can get an auth key from: https://login.tailscale.com/admin/settings/keys"
+        echo ""
+        read -e -p "Install Tailscale? (y/n): " -i "${INSTALL_TAILSCALE:-y}" INSTALL_TAILSCALE
+
+        if [[ "$INSTALL_TAILSCALE" =~ ^[Yy]$ ]]; then
+            INSTALL_TAILSCALE="yes"
+            echo ""
+            echo "Auth key is optional. If not provided, you'll need to authenticate manually after installation."
+            echo "For unattended setup, use a reusable auth key (recommended: with tag and expiry)."
+            echo ""
+            read -e -p "Tailscale Auth Key (leave empty for manual auth): " -i "${TAILSCALE_AUTH_KEY:-}" TAILSCALE_AUTH_KEY
+
+            if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
+                echo -e "${CLR_GREEN}✓ Auth key provided. Tailscale will be configured automatically${CLR_RESET}"
+            else
+                echo -e "${CLR_YELLOW}No auth key provided. You'll need to run 'tailscale up --ssh' manually after reboot.${CLR_RESET}"
+            fi
+
+            TAILSCALE_SSH="yes"
+            TAILSCALE_WEBUI="yes"
+            echo -e "${CLR_GREEN}Tailscale SSH and Web UI will be enabled.${CLR_RESET}"
+            echo -e "${CLR_GREEN}Proxmox Web UI will be accessible at https://HOSTNAME.your-tailnet.ts.net${CLR_RESET}"
+        else
+            INSTALL_TAILSCALE="no"
+            TAILSCALE_AUTH_KEY=""
+            TAILSCALE_SSH="no"
+            TAILSCALE_WEBUI="no"
+            echo -e "${CLR_YELLOW}Tailscale installation skipped.${CLR_RESET}"
+        fi
+    fi
+
+    # Save config if requested
+    if [[ -n "$SAVE_CONFIG" ]]; then
+        save_config "$SAVE_CONFIG"
     fi
 }
 
@@ -522,25 +836,35 @@ get_system_inputs() {
 # =============================================================================
 
 prepare_packages() {
-    echo -e "${CLR_BLUE}Installing packages...${CLR_RESET}"
-    echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" | tee /etc/apt/sources.list.d/pve.list
+    echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve.list
 
-    if ! curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg; then
+    # Download Proxmox GPG key
+    curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
+    show_progress $! "Downloading Proxmox GPG key"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    if ! apt clean || ! apt update; then
+    # Update package lists
+    apt clean > /dev/null 2>&1
+    apt update > /dev/null 2>&1 &
+    show_progress $! "Updating package lists"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    if ! apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass; then
+    # Install packages
+    apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
+    show_progress $! "Installing packages"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
         exit 1
     fi
-
-    echo -e "${CLR_GREEN}Packages installed.${CLR_RESET}"
 }
 
 # Fetch latest Proxmox VE ISO
@@ -558,24 +882,24 @@ get_latest_proxmox_ve_iso() {
 
 download_proxmox_iso() {
     if [[ -f "pve.iso" ]]; then
-        echo -e "${CLR_YELLOW}Proxmox ISO file already exists, skipping download.${CLR_RESET}"
+        echo -e "${CLR_GREEN}✓ Proxmox ISO already exists, skipping download${CLR_RESET}"
         return 0
     fi
 
-    echo -e "${CLR_BLUE}Downloading Proxmox ISO...${CLR_RESET}"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         echo -e "${CLR_RED}Failed to retrieve Proxmox ISO URL! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    # Extract ISO filename and construct checksum URL
     ISO_FILENAME=$(basename "$PROXMOX_ISO_URL")
     CHECKSUM_URL="https://enterprise.proxmox.com/iso/SHA256SUMS"
 
-    echo -e "${CLR_YELLOW}Downloading: $ISO_FILENAME${CLR_RESET}"
-
-    if ! wget -O pve.iso "$PROXMOX_ISO_URL"; then
+    # Download ISO with progress bar
+    wget -q --show-progress -O pve.iso "$PROXMOX_ISO_URL" 2>&1 &
+    show_progress $! "Downloading $ISO_FILENAME"
+    wait $!
+    if [[ $? -ne 0 ]]; then
         echo -e "${CLR_RED}Failed to download Proxmox ISO! Exiting.${CLR_RESET}"
         exit 1
     fi
@@ -586,14 +910,22 @@ download_proxmox_iso() {
         exit 1
     fi
 
-    # Verify ISO checksum
-    echo -e "${CLR_BLUE}Verifying ISO checksum...${CLR_RESET}"
-    if wget -q -O SHA256SUMS "$CHECKSUM_URL"; then
+    # Verify ISO checksum with progress
+    wget -q -O SHA256SUMS "$CHECKSUM_URL" 2>/dev/null &
+    show_progress $! "Downloading checksum"
+    wait $!
+
+    if [[ -f "SHA256SUMS" ]]; then
         EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
         if [[ -n "$EXPECTED_CHECKSUM" ]]; then
-            ACTUAL_CHECKSUM=$(sha256sum pve.iso | awk '{print $1}')
+            sha256sum pve.iso > /tmp/iso_checksum.txt 2>/dev/null &
+            show_progress $! "Verifying ISO checksum"
+            wait $!
+            ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
+            rm -f /tmp/iso_checksum.txt
+
             if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                echo -e "${CLR_GREEN}ISO checksum verified successfully.${CLR_RESET}"
+                echo -e "${CLR_GREEN}✓ ISO checksum verified${CLR_RESET}"
             else
                 echo -e "${CLR_RED}ISO checksum verification FAILED!${CLR_RESET}"
                 echo -e "${CLR_RED}Expected: $EXPECTED_CHECKSUM${CLR_RESET}"
@@ -602,14 +934,12 @@ download_proxmox_iso() {
                 exit 1
             fi
         else
-            echo -e "${CLR_YELLOW}Warning: Could not find checksum for $ISO_FILENAME, skipping verification.${CLR_RESET}"
+            echo -e "${CLR_YELLOW}⚠ Could not find checksum for $ISO_FILENAME${CLR_RESET}"
         fi
         rm -f SHA256SUMS
     else
-        echo -e "${CLR_YELLOW}Warning: Could not download checksum file, skipping verification.${CLR_RESET}"
+        echo -e "${CLR_YELLOW}⚠ Could not download checksum file${CLR_RESET}"
     fi
-
-    echo -e "${CLR_GREEN}Proxmox ISO downloaded.${CLR_RESET}"
 }
 
 make_answer_toml() {
@@ -643,13 +973,13 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    echo -e "${CLR_GREEN}answer.toml created (ZFS $ZFS_RAID mode).${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ answer.toml created (ZFS $ZFS_RAID mode)${CLR_RESET}"
 }
 
 make_autoinstall_iso() {
     echo -e "${CLR_BLUE}Making autoinstall.iso...${CLR_RESET}"
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso
-    echo -e "${CLR_GREEN}pve-autoinstall.iso created.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ pve-autoinstall.iso created${CLR_RESET}"
 }
 
 # --- 06-qemu.sh ---
@@ -691,12 +1021,7 @@ setup_qemu_config() {
 
 # Install Proxmox via QEMU
 install_proxmox() {
-    echo -e "${CLR_GREEN}Starting Proxmox VE installation...${CLR_RESET}"
     setup_qemu_config
-
-    echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, this takes about 5-10 minutes${CLR_RESET}"
-    echo ""
 
     # Run QEMU in background and show progress
     qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
@@ -704,7 +1029,7 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    show_progress $! "Installing Proxmox VE to disk"
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)"
 }
 
 # Boot installed Proxmox with SSH port forwarding
@@ -762,7 +1087,7 @@ make_template_files() {
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
-    echo -e "${CLR_GREEN}Template files modified successfully.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
 }
 
 # Configure the installed Proxmox via SSH
@@ -835,39 +1160,26 @@ ZFSEOF
 REPOEOF
 
     # Update all system packages
-    echo -e "${CLR_YELLOW}Updating system packages...${CLR_RESET}"
-    remote_exec_script << 'UPDATEEOF'
+    remote_exec_with_progress "Updating system packages" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get dist-upgrade -yqq
         apt-get autoremove -yqq
         apt-get clean
-
-        # Proxmox-specific updates
         pveupgrade 2>/dev/null || true
         pveam update 2>/dev/null || true
-
-        echo "System packages updated"
-UPDATEEOF
+    '
 
     # Install monitoring and system utilities
-    echo -e "${CLR_YELLOW}Installing monitoring and system utilities...${CLR_RESET}"
-    remote_exec_script << 'UTILSEOF'
+    remote_exec_with_progress "Installing monitoring utilities" '
         export DEBIAN_FRONTEND=noninteractive
-
-        # Install monitoring & system utilities
         apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
-            echo "Some packages may not be available, installing what we can..."
             for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
-                apt-get install -yqq "$pkg" 2>/dev/null || echo "Package $pkg not available"
+                apt-get install -yqq "$pkg" 2>/dev/null || true
             done
         }
-
-        # Optional: for VM image manipulation
-        apt-get install -yqq libguestfs-tools 2>/dev/null || echo "libguestfs-tools not available"
-
-        echo "Monitoring utilities installed"
-UTILSEOF
+        apt-get install -yqq libguestfs-tools 2>/dev/null || true
+    '
 
     # Configure nf_conntrack
     echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
@@ -887,25 +1199,15 @@ UTILSEOF
 CONNTRACKEOF
 
     # Configure CPU governor
-    echo -e "${CLR_YELLOW}Configuring CPU governor...${CLR_RESET}"
-    remote_exec_script << 'CPUEOF'
-        # Install cpufrequtils for CPU governor management (will work on bare metal after reboot)
-        # Note: enterprise repos already disabled above, so apt update should work without 401 errors
+    remote_exec_with_progress "Configuring CPU governor" '
         apt-get update -qq && apt-get install -yqq cpufrequtils 2>/dev/null || true
-
-        # Set performance governor as default - this config will be applied on boot
-        echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
-
-        # Try to apply immediately (only works if cpufreq is available, not in QEMU)
+        echo "GOVERNOR=\"performance\"" > /etc/default/cpufrequtils
         if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
             for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
                 [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true
             done
-            echo "CPU governor set to performance (applied immediately)"
-        else
-            echo "CPU governor configured for performance (will apply after reboot on bare metal)"
         fi
-CPUEOF
+    '
 
     # Remove Proxmox subscription notice
     echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
@@ -953,21 +1255,14 @@ CEPHEOF
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-        echo -e "${CLR_YELLOW}Installing Tailscale VPN...${CLR_RESET}"
-        remote_exec_script << 'TAILSCALEEOF'
-            # Add Tailscale repository and install
+        remote_exec_with_progress "Installing Tailscale VPN" '
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
             curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
-
             apt-get update -qq
             apt-get install -yqq tailscale
-
-            # Enable and start tailscaled service
             systemctl enable tailscaled
             systemctl start tailscaled
-
-            echo "Tailscale installed successfully"
-TAILSCALEEOF
+        '
 
         # Build tailscale up command with selected options
         TAILSCALE_UP_CMD="tailscale up"
@@ -986,13 +1281,13 @@ TAILSCALEEOF
             # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
             TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            echo -e "${CLR_GREEN}Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+            echo -e "${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                echo -e "${CLR_GREEN}Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+                echo -e "${CLR_GREEN}✓ Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -1012,7 +1307,7 @@ TAILSCALEEOF
     remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
     remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    echo -e "${CLR_GREEN}Security hardening configured${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ Security hardening configured${CLR_RESET}"
 
     # Power off the VM
     echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
@@ -1021,7 +1316,7 @@ TAILSCALEEOF
     # Wait for QEMU to exit
     echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
     wait $QEMU_PID || true
-    echo -e "${CLR_GREEN}QEMU process has exited.${CLR_RESET}"
+    echo -e "${CLR_GREEN}✓ QEMU process exited${CLR_RESET}"
 }
 
 # --- 99-main.sh ---
@@ -1029,11 +1324,27 @@ TAILSCALEEOF
 # Finish and reboot
 # =============================================================================
 
+# Calculate and display total installation time
+show_total_time() {
+    local end_time=$(date +%s)
+    local total_seconds=$((end_time - INSTALL_START_TIME))
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+
+    if [[ $hours -gt 0 ]]; then
+        echo -e "${CLR_GREEN}Total installation time: ${hours}h ${minutes}m ${seconds}s${CLR_RESET}"
+    else
+        echo -e "${CLR_GREEN}Total installation time: ${minutes}m ${seconds}s${CLR_RESET}"
+    fi
+}
+
 # Function to reboot into the main OS
 reboot_to_main_os() {
     echo -e "${CLR_GREEN}============================================${CLR_RESET}"
     echo -e "${CLR_GREEN}  Installation Complete!${CLR_RESET}"
     echo -e "${CLR_GREEN}============================================${CLR_RESET}"
+    show_total_time
     echo ""
     echo -e "${CLR_YELLOW}Security Configuration Summary:${CLR_RESET}"
     echo "  ✓ SSH public key deployed"
@@ -1085,6 +1396,10 @@ reboot_to_main_os() {
 # =============================================================================
 # Main execution flow
 # =============================================================================
+
+# Run pre-flight checks first
+preflight_checks
+
 detect_nvme_drives
 get_system_inputs
 prepare_packages
