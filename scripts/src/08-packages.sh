@@ -91,9 +91,7 @@ download_proxmox_iso() {
             ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
             rm -f /tmp/iso_checksum.txt
 
-            if [[ "$EXPECTED_CHECKSUM" == "$ACTUAL_CHECKSUM" ]]; then
-                print_success "ISO checksum verified"
-            else
+            if [[ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]]; then
                 print_error "ISO checksum verification FAILED!"
                 print_error "Expected: $EXPECTED_CHECKSUM"
                 print_error "Actual:   $ACTUAL_CHECKSUM"
@@ -110,8 +108,6 @@ download_proxmox_iso() {
 }
 
 make_answer_toml() {
-    print_info "Making answer.toml..."
-
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
         single)
@@ -145,7 +141,6 @@ make_answer_toml() {
     disk_list = $DISK_LIST
 
 EOF
-    print_success "answer.toml created (ZFS $ZFS_RAID mode)"
 }
 
 make_autoinstall_iso() {
