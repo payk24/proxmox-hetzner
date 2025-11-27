@@ -411,9 +411,8 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    # Read password (silent mode, no echo)
-    read -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-    echo ""
+    # Read password with asterisks displayed
+    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
@@ -427,8 +426,7 @@ get_system_inputs() {
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
         echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-        read -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-        echo ""
+        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
     done
 
     echo "Private subnet: $PRIVATE_SUBNET"
