@@ -1008,7 +1008,39 @@ get_system_inputs() {
         TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
         EMAIL="${EMAIL:-admin@example.com}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
+
+        # Password handling in non-interactive mode
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+
+        # SSH Public Key in non-interactive mode
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            # Try to get from rescue system
+            if [[ -f /root/.ssh/authorized_keys ]]; then
+                SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
+            fi
+        fi
+        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
+            echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+        parse_ssh_key "$SSH_PUBLIC_KEY"
+        echo -e "${CLR_GREEN}✓ SSH key configured (${SSH_KEY_TYPE})${CLR_RESET}"
+
+        # Tailscale in non-interactive mode
+        INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
+        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
+            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
+            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
+        fi
     else
+        # =====================================================================
+        # SECTION 1: Text inputs (hostname, domain, email, password)
+        # =====================================================================
+
         local hostname_prompt="Enter your hostname (e.g., pve, proxmox): "
         while true; do
             read -e -p "$hostname_prompt" -i "${PVE_HOSTNAME:-pve}" PVE_HOSTNAME
@@ -1023,18 +1055,34 @@ get_system_inputs() {
         read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
         printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
 
-        # Timezone selection with interactive menu
-        local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
-        local tz_default="${TIMEZONE:-Europe/Kyiv}"
-        local tz_default_idx=0
-
-        # Find default timezone index
-        for i in "${!tz_options[@]}"; do
-            if [[ "${tz_options[$i]}" == "$tz_default" ]]; then
-                tz_default_idx=$i
+        local email_prompt="Enter your email address: "
+        while true; do
+            read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
+            if validate_email "$EMAIL"; then
+                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
                 break
             fi
+            echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
         done
+
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            local password_prompt="Enter your System New root password: "
+            NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
+            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
+                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+                NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
+            done
+            echo -e "${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********"
+        fi
+
+        # =====================================================================
+        # SECTION 2: Interactive menus (all selection menus grouped together)
+        # =====================================================================
+        echo ""  # Visual separator before menus
+
+        # --- Timezone selection menu ---
+        local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
+        local tz_default="${TIMEZONE:-Europe/Kyiv}"
 
         interactive_menu \
             "Timezone (↑/↓ select, Enter confirm)" \
@@ -1064,17 +1112,7 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
         fi
 
-        local email_prompt="Enter your email address: "
-        while true; do
-            read -e -p "$email_prompt" -i "${EMAIL:-admin@example.com}" EMAIL
-            if validate_email "$EMAIL"; then
-                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${email_prompt}${EMAIL}\033[K\n"
-                break
-            fi
-            echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
-        done
-
-        # Private subnet selection with interactive menu
+        # --- Private subnet selection menu ---
         local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
         local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
@@ -1102,7 +1140,7 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
         fi
 
-        # ZFS RAID mode selection (only if 2+ drives detected)
+        # --- ZFS RAID mode selection menu (only if 2+ drives detected) ---
         if [ "${NVME_COUNT:-0}" -ge 2 ]; then
             local zfs_options=("raid1" "raid0" "single")
             local zfs_labels=("RAID-1 (mirror) - Recommended" "RAID-0 (stripe) - No redundancy" "Single drive - No redundancy")
@@ -1117,50 +1155,8 @@ get_system_inputs() {
             ZFS_RAID="${zfs_options[$MENU_SELECTED]}"
             echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${zfs_labels[$MENU_SELECTED]}"
         fi
-    fi
 
-    FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
-
-    # Get the network prefix (first three octets) from PRIVATE_SUBNET
-    PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
-    PRIVATE_IP="${PRIVATE_CIDR}.1"
-    SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
-    PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
-
-    # Password handling
-    if [[ "$NON_INTERACTIVE" == true ]]; then
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
-            exit 1
-        fi
-    else
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            local password_prompt="Enter your System New root password: "
-            NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-                NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            done
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********"
-        fi
-    fi
-
-    # SSH Public Key (required for hardened SSH config)
-    if [[ "$NON_INTERACTIVE" == true ]]; then
-        # In non-interactive mode, SSH_PUBLIC_KEY must be set in config
-        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            # Try to get from rescue system
-            if [[ -f /root/.ssh/authorized_keys ]]; then
-                SSH_PUBLIC_KEY=$(grep -E "^ssh-(rsa|ed25519|ecdsa)" /root/.ssh/authorized_keys 2>/dev/null | head -1)
-            fi
-        fi
-        if [[ -z "$SSH_PUBLIC_KEY" ]]; then
-            echo -e "${CLR_RED}Error: SSH_PUBLIC_KEY required in non-interactive mode${CLR_RESET}"
-            exit 1
-        fi
-        parse_ssh_key "$SSH_PUBLIC_KEY"
-        echo -e "${CLR_GREEN}✓ SSH key configured (${SSH_KEY_TYPE})${CLR_RESET}"
-    else
+        # --- SSH Public Key selection menu ---
         # Try to get SSH key from Rescue System (Hetzner stores it in authorized_keys)
         local DETECTED_SSH_KEY=""
         if [[ -f /root/.ssh/authorized_keys ]]; then
@@ -1246,19 +1242,8 @@ get_system_inputs() {
             parse_ssh_key "$SSH_PUBLIC_KEY"
             echo -e "${CLR_GREEN}✓${CLR_RESET} SSH key configured (${SSH_KEY_TYPE})"
         fi
-    fi
 
-    # Tailscale VPN Configuration (Optional)
-    if [[ "$NON_INTERACTIVE" == true ]]; then
-        # Use config values, default to no if not set
-        INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
-        if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
-            TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
-            TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
-            echo -e "${CLR_GREEN}✓ Tailscale will be installed${CLR_RESET}"
-        fi
-    else
-        # Interactive Tailscale configuration
+        # --- Tailscale VPN selection menu ---
         local ts_header="Tailscale provides secure remote access to your server."$'\n'
         ts_header+="Auth key: https://login.tailscale.com/admin/settings/keys"
 
@@ -1315,6 +1300,15 @@ get_system_inputs() {
             echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
         fi
     fi
+
+    # Calculate derived values
+    FQDN="${PVE_HOSTNAME}.${DOMAIN_SUFFIX}"
+
+    # Get the network prefix (first three octets) from PRIVATE_SUBNET
+    PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
+    PRIVATE_IP="${PRIVATE_CIDR}.1"
+    SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
+    PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
 
     # Save config if requested
     if [[ -n "$SAVE_CONFIG" ]]; then
