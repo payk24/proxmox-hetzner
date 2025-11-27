@@ -8,7 +8,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/src"
-OUTPUT_FILE="$SCRIPT_DIR/pve-install.sh"
+OUTPUT_FILE="$SCRIPT_DIR/../pve-install.sh"
 
 echo "Building pve-install.sh..."
 

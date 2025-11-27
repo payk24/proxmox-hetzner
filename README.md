@@ -1,8 +1,8 @@
 # Proxmox on Hetzner Without Console Access
 
 <div align="center">
-  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/files/icons/proxmox.png" alt="Proxmox" height="64" /> 
-  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/files/icons/hetzner.png" alt="Hetzner" height="50" />
+  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/proxmox.png" alt="Proxmox" height="64" />
+  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/hetzner.png" alt="Hetzner" height="50" />
   <h3>Automated Installation for Hetzner Dedicated Servers</h3>
   
   ![GitHub Stars](https://img.shields.io/github/stars/payk24/proxmox-hetzner.svg)
@@ -55,7 +55,7 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 Execute this single command in the rescue system terminal:
 
 ```bash
-bash <(curl -sSL https://github.com/payk24/proxmox-hetzner/raw/main/scripts/pve-install.sh)
+bash <(curl -sSL https://github.com/payk24/proxmox-hetzner/raw/main/pve-install.sh)
 ```
 
 The script will:
