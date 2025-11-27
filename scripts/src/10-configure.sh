@@ -3,9 +3,9 @@
 # =============================================================================
 
 make_template_files() {
-    echo -e "${CLR_BLUE}Modifying template files...${CLR_RESET}"
+    print_info "Modifying template files..."
 
-    echo -e "${CLR_YELLOW}Downloading template files...${CLR_RESET}"
+    print_info "Downloading template files..."
     mkdir -p ./template_files
 
     download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
@@ -21,14 +21,14 @@ make_template_files() {
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
     # Process hosts file
-    echo -e "${CLR_YELLOW}Processing hosts file...${CLR_RESET}"
+    print_info "Processing hosts file..."
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
     sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
     sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
     sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
 
     # Process interfaces file
-    echo -e "${CLR_YELLOW}Processing interfaces file (mode: ${BRIDGE_MODE:-internal})...${CLR_RESET}"
+    print_info "Processing interfaces file (mode: ${BRIDGE_MODE:-internal})..."
     sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
     sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
@@ -37,12 +37,12 @@ make_template_files() {
     sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
     sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
 
-    echo -e "${CLR_GREEN}✓ Template files modified${CLR_RESET}"
+    print_success "Template files modified"
 }
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
-    echo -e "${CLR_BLUE}Starting post-installation configuration via SSH...${CLR_RESET}"
+    print_info "Starting post-installation configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
 
@@ -60,7 +60,7 @@ configure_proxmox_via_ssh() {
     remote_exec "systemctl disable --now rpcbind rpcbind.socket"
 
     # Configure ZFS ARC memory limits
-    echo -e "${CLR_YELLOW}Configuring ZFS ARC memory limits...${CLR_RESET}"
+    print_info "Configuring ZFS ARC memory limits..."
     remote_exec_script << 'ZFSEOF'
         # Get total RAM in bytes
         TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -90,10 +90,9 @@ configure_proxmox_via_ssh() {
 ZFSEOF
 
     # Disable enterprise repositories
-    echo -e "${CLR_YELLOW}Disabling enterprise repositories...${CLR_RESET}"
+    print_info "Disabling enterprise repositories..."
     remote_exec_script << 'REPOEOF'
         # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
-        # These require a paid subscription and cause 401 errors
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
@@ -131,7 +130,7 @@ REPOEOF
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
-    # Configure UTF-8 locales for proper Cyrillic/international character support
+    # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq locales
@@ -142,7 +141,7 @@ REPOEOF
     '
 
     # Configure nf_conntrack
-    echo -e "${CLR_YELLOW}Configuring nf_conntrack...${CLR_RESET}"
+    print_info "Configuring nf_conntrack..."
     remote_exec_script << 'CONNTRACKEOF'
         # Add nf_conntrack module to load at boot
         if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
@@ -170,7 +169,7 @@ CONNTRACKEOF
     '
 
     # Remove Proxmox subscription notice
-    echo -e "${CLR_YELLOW}Removing Proxmox subscription notice...${CLR_RESET}"
+    print_info "Removing Proxmox subscription notice..."
     remote_exec_script << 'SUBEOF'
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
@@ -182,7 +181,7 @@ CONNTRACKEOF
 SUBEOF
 
     # Hide Ceph from UI (not needed for single-server setup)
-    echo -e "${CLR_YELLOW}Hiding Ceph from UI...${CLR_RESET}"
+    print_info "Hiding Ceph from UI..."
     remote_exec_script << 'CEPHEOF'
         # Create custom CSS to hide Ceph-related UI elements
         CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
@@ -203,7 +202,6 @@ CSS
         # Alternative: patch JavaScript to hide Ceph panel completely
         PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
         if [ -f "$PVE_MANAGER_JS" ]; then
-            # Hide Ceph from node tree navigation
             if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
                 sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
             fi
@@ -235,46 +233,46 @@ CEPHEOF
 
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            echo -e "${CLR_YELLOW}Authenticating Tailscale with provided auth key...${CLR_RESET}"
+            print_info "Authenticating Tailscale with provided auth key..."
             remote_exec "$TAILSCALE_UP_CMD"
 
             # Get Tailscale IP and hostname for display
             TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
             TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            echo -e "${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}"
+            print_success "Tailscale authenticated. IP: ${TAILSCALE_IP}"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                echo -e "${CLR_YELLOW}Configuring Tailscale Serve for Proxmox Web UI...${CLR_RESET}"
+                print_info "Configuring Tailscale Serve for Proxmox Web UI..."
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
-                echo -e "${CLR_GREEN}✓ Proxmox Web UI available via Tailscale Serve${CLR_RESET}"
+                print_success "Proxmox Web UI available via Tailscale Serve"
             fi
         else
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""
-            echo -e "${CLR_YELLOW}Tailscale installed but not authenticated.${CLR_RESET}"
-            echo -e "${CLR_YELLOW}After reboot, run these commands to enable SSH and Web UI:${CLR_RESET}"
-            echo -e "${CLR_YELLOW}  tailscale up --ssh${CLR_RESET}"
-            echo -e "${CLR_YELLOW}  tailscale serve --bg --https=443 https://127.0.0.1:8006${CLR_RESET}"
+            print_warning "Tailscale installed but not authenticated."
+            print_info "After reboot, run these commands to enable SSH and Web UI:"
+            print_info "  tailscale up --ssh"
+            print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
         fi
     fi
 
     # Deploy SSH hardening LAST (after all other operations)
-    echo -e "${CLR_YELLOW}Deploying SSH hardening...${CLR_RESET}"
+    print_info "Deploying SSH hardening..."
 
     # Deploy SSH public key FIRST (before disabling password auth!)
     remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
     remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
     remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
 
-    echo -e "${CLR_GREEN}✓ Security hardening configured${CLR_RESET}"
+    print_success "Security hardening configured"
 
     # Power off the VM
-    echo -e "${CLR_YELLOW}Powering off the VM...${CLR_RESET}"
+    print_info "Powering off the VM..."
     remote_exec "poweroff" || true
 
     # Wait for QEMU to exit
-    echo -e "${CLR_YELLOW}Waiting for QEMU process to exit...${CLR_RESET}"
+    print_info "Waiting for QEMU process to exit..."
     wait $QEMU_PID || true
-    echo -e "${CLR_GREEN}✓ QEMU process exited${CLR_RESET}"
+    print_success "QEMU process exited"
 }

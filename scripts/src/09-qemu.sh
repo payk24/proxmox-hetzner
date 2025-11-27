@@ -3,7 +3,7 @@
 # =============================================================================
 
 is_uefi_mode() {
-    [ -d /sys/firmware/efi ]
+    [[ -d /sys/firmware/efi ]]
 }
 
 # Configure QEMU settings (shared between install and boot)
@@ -11,10 +11,10 @@ setup_qemu_config() {
     # UEFI configuration
     if is_uefi_mode; then
         UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        echo -e "${CLR_YELLOW}UEFI mode detected${CLR_RESET}"
+        print_info "UEFI mode detected"
     else
         UEFI_OPTS=""
-        echo -e "${CLR_YELLOW}Legacy BIOS mode${CLR_RESET}"
+        print_info "Legacy BIOS mode"
     fi
 
     # CPU and RAM configuration
@@ -22,16 +22,16 @@ setup_qemu_config() {
     local available_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
 
     QEMU_CORES=$((available_cores / 2))
-    [ $QEMU_CORES -lt 2 ] && QEMU_CORES=2
-    [ $QEMU_CORES -gt $available_cores ] && QEMU_CORES=$available_cores
-    [ $QEMU_CORES -gt 16 ] && QEMU_CORES=16
+    [[ $QEMU_CORES -lt 2 ]] && QEMU_CORES=2
+    [[ $QEMU_CORES -gt $available_cores ]] && QEMU_CORES=$available_cores
+    [[ $QEMU_CORES -gt 16 ]] && QEMU_CORES=16
 
     QEMU_RAM=8192
-    [ $available_ram_mb -lt 16384 ] && QEMU_RAM=4096
+    [[ $available_ram_mb -lt 16384 ]] && QEMU_RAM=4096
 
     # Drive configuration
     DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
-    [ -n "$NVME_DRIVE_2" ] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    [[ -n "$NVME_DRIVE_2" ]] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
 }
 
 # Install Proxmox via QEMU
@@ -49,7 +49,7 @@ install_proxmox() {
 
 # Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
-    echo -e "${CLR_GREEN}Booting installed Proxmox with SSH port forwarding...${CLR_RESET}"
+    print_success "Booting installed Proxmox with SSH port forwarding..."
     setup_qemu_config
 
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
