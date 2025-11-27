@@ -206,12 +206,22 @@ get_system_inputs() {
 
         # Password - skip if already set via env
         if [[ -n "$NEW_ROOT_PASSWORD" ]]; then
+            if ! validate_password "$NEW_ROOT_PASSWORD"; then
+                echo -e "${CLR_RED}Error: Password contains invalid characters (Cyrillic or non-ASCII).${CLR_RESET}"
+                echo -e "${CLR_RED}Only Latin letters, digits, and special characters are allowed.${CLR_RESET}"
+                exit 1
+            fi
             echo -e "${CLR_GREEN}✓${CLR_RESET} Password: ******** (from env)"
         else
             local password_prompt="Enter your System New root password: "
             NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+            while [[ -z "$NEW_ROOT_PASSWORD" ]] || ! validate_password "$NEW_ROOT_PASSWORD"; do
+                if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+                    echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+                else
+                    echo -e "${CLR_RED}Password contains invalid characters (Cyrillic or non-ASCII).${CLR_RESET}"
+                    echo -e "${CLR_RED}Only Latin letters, digits, and special characters are allowed.${CLR_RESET}"
+                fi
                 NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             done
             printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********\033[K\n"

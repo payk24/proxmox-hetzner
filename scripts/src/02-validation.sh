@@ -132,6 +132,17 @@ validate_email() {
     return 0
 }
 
+validate_password() {
+    local password="$1"
+    # Password must contain only ASCII printable characters (no Cyrillic or other non-ASCII)
+    # Allowed: Latin letters, digits, and special characters (ASCII 32-126)
+    # Using LC_ALL=C ensures only ASCII characters match [:print:]
+    if ! LC_ALL=C bash -c '[[ "$1" =~ ^[[:print:]]+$ ]]' _ "$password"; then
+        return 1
+    fi
+    return 0
+}
+
 validate_subnet() {
     local subnet="$1"
     # Validate CIDR notation (e.g., 10.0.0.0/24)
