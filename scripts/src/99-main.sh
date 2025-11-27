@@ -53,13 +53,13 @@ reboot_to_main_os() {
         fi
     fi
 
-    # Display ASCII art header
+    # Display ASCII art header (centered for MENU_BOX_WIDTH=60)
     echo ""
-    echo '   ___                      _      _       _'
-    echo '  / __| ___ _ __  _ __ _  | |__ _| |_ ___| |'
-    echo ' | (__ / _ \  _ \|  _ \ | | / _` |  _/ -_)_|'
-    echo '  \___\___/_|_|_|| .__/_| |_\__,_|\__\___(_)'
-    echo '                 |_|'
+    echo '      ___                      _      _         _ _'
+    echo '     / __|___ _ __  _ __  ___ | |__ _| |_ ___  | | |'
+    echo '    | (__/ _ \  _ \|  _ \/ _ \| / _` |  _/ -_) |_|_|'
+    echo '     \___\___/_|_|_|| .__/\___/|_\__,_|\__\___|(_|_)'
+    echo '                    |_|'
     echo ""
 
     # Display with boxes
