@@ -190,7 +190,7 @@ show_system_status() {
             echo "|--- Storage ---|"
             echo "$storage_rows"
         } | column -t -s '|'
-    } | boxes -d stone -p a1 | colorize_status
+    } | boxes -d stone -p a1 -s $MENU_BOX_WIDTH | colorize_status
     echo ""
 
     # Check for errors
