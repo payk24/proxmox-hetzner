@@ -94,7 +94,7 @@ show_progress() {
         sleep 0.2
     done
 
-    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
+    printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
 }
 
 # Wait for condition with progress
@@ -111,12 +111,12 @@ wait_with_progress() {
         local elapsed=$(($(date +%s) - start_time))
 
         if eval "$check_cmd" 2>/dev/null; then
-            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
+            printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
             return 0
         fi
 
         if [ $elapsed -ge $timeout ]; then
-            printf "\r${CLR_RED}✗ %s timed out${CLR_RESET}                    \n" "$message"
+            printf "\r\e[K${CLR_RED}✗ %s timed out${CLR_RESET}\n" "$message"
             return 1
         fi
 
