@@ -91,36 +91,18 @@ show_system_status() {
         sys_rows+="[ERROR]|KVM|Not available"
     fi
 
-    # Build storage rows
+    # Build storage rows (Mode will be selected interactively in get_system_inputs)
     local storage_rows=""
     if [ $nvme_error -eq 1 ]; then
         storage_rows="[ERROR]|No NVMe drives detected!"
     else
         for i in "${!drive_names[@]}"; do
-            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"$'\n'
+            storage_rows+="[OK]|${drive_names[$i]}|${drive_sizes[$i]}|${drive_models[$i]:0:25}"
+            # Add newline only if not the last item
+            if [ $i -lt $((${#drive_names[@]} - 1)) ]; then
+                storage_rows+=$'\n'
+            fi
         done
-        # Add empty line and mode
-        storage_rows+=$'\n'
-        case "$ZFS_RAID" in
-            single)
-                storage_rows+="[WARN]|Mode: ZFS Single (no redundancy)"
-                ;;
-            raid0)
-                storage_rows+="[WARN]|Mode: ZFS RAID-0 (stripe, no redundancy)"
-                ;;
-            raid1)
-                storage_rows+="[OK]|Mode: ZFS RAID-1 (mirror)"
-                ;;
-            raid10)
-                storage_rows+="[OK]|Mode: ZFS RAID-10 (stripe+mirror)"
-                ;;
-            raidz*)
-                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID^^}"
-                ;;
-            *)
-                storage_rows+="[OK]|Mode: ZFS ${ZFS_RAID}"
-                ;;
-        esac
     fi
 
     # Display with boxes and colorize
