@@ -44,7 +44,7 @@ make_template_files() {
 configure_proxmox_via_ssh() {
     print_info "Starting post-installation configuration via SSH..."
     make_template_files
-    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
+    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
@@ -57,7 +57,7 @@ configure_proxmox_via_ssh() {
     remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
     remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
 
     # Configure ZFS ARC memory limits
     print_info "Configuring ZFS ARC memory limits..."
@@ -86,7 +86,6 @@ configure_proxmox_via_ssh() {
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
 
-        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
 ZFSEOF
 
     # Disable enterprise repositories
@@ -97,14 +96,12 @@ ZFSEOF
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
                 mv "$repo_file" "${repo_file}.disabled"
-                echo "Disabled $(basename "$repo_file")"
             fi
         done
 
         # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
             sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
-            echo "Commented out enterprise repos in sources.list"
         fi
 REPOEOF
 
@@ -153,8 +150,6 @@ REPOEOF
             echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
             echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
-
-        echo "nf_conntrack configured"
 CONNTRACKEOF
 
     # Configure CPU governor
@@ -174,42 +169,8 @@ CONNTRACKEOF
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
             sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
-            echo "Subscription notice removed"
-        else
-            echo "proxmoxlib.js not found, skipping"
         fi
 SUBEOF
-
-    # Hide Ceph from UI (not needed for single-server setup)
-    print_info "Hiding Ceph from UI..."
-    remote_exec_script << 'CEPHEOF'
-        # Create custom CSS to hide Ceph-related UI elements
-        CUSTOM_CSS="/usr/share/pve-manager/css/custom.css"
-        cat > "$CUSTOM_CSS" << 'CSS'
-/* Hide Ceph menu items - not needed for single server */
-#pvelogoV { background-image: url(/pve2/images/logo.png) !important; }
-.x-treelist-item-text:has-text("Ceph") { display: none !important; }
-tr[data-qtip*="Ceph"] { display: none !important; }
-CSS
-
-        # Add custom CSS to index template if not already added
-        INDEX_TMPL="/usr/share/pve-manager/index.html.tpl"
-        if [ -f "$INDEX_TMPL" ] && ! grep -q "custom.css" "$INDEX_TMPL"; then
-            sed -i '/<\/head>/i <link rel="stylesheet" type="text/css" href="/pve2/css/custom.css">' "$INDEX_TMPL"
-            echo "Custom CSS added to hide Ceph"
-        fi
-
-        # Alternative: patch JavaScript to hide Ceph panel completely
-        PVE_MANAGER_JS="/usr/share/pve-manager/js/pvemanagerlib.js"
-        if [ -f "$PVE_MANAGER_JS" ]; then
-            if ! grep -q "// Ceph hidden" "$PVE_MANAGER_JS"; then
-                sed -i "s/itemId: 'ceph'/itemId: 'ceph', hidden: true \/\/ Ceph hidden/g" "$PVE_MANAGER_JS" 2>/dev/null || true
-            fi
-        fi
-
-        systemctl restart pveproxy.service
-        echo "Ceph UI elements hidden"
-CEPHEOF
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -244,7 +205,7 @@ CEPHEOF
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
                 print_info "Configuring Tailscale Serve for Proxmox Web UI..."
-                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006"
+                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" >/dev/null 2>&1
                 print_success "Proxmox Web UI available via Tailscale Serve"
             fi
         else
