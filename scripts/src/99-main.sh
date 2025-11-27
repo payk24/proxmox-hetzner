@@ -29,6 +29,9 @@ reboot_to_main_os() {
     echo "  ✓ VM image tools: libguestfs-tools"
     echo "  ✓ ZFS ARC memory limits configured"
     echo "  ✓ nf_conntrack optimized for high connection counts"
+    echo "  ✓ NTP time sync (chrony) with Hetzner servers"
+    echo "  ✓ Dynamic MOTD with system status"
+    echo "  ✓ Unattended security upgrades (kernel excluded)"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         echo "  ✓ Tailscale VPN installed (SSH + Web UI enabled)"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
