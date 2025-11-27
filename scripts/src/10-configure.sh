@@ -55,7 +55,6 @@ make_template_files() {
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
-    print_info "Starting post-installation configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
