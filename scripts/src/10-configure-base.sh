@@ -44,7 +44,7 @@ make_template_files() {
 configure_base_system() {
     print_info "Starting base system configuration via SSH..."
     make_template_files
-    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" || true
+    ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" >/dev/null 2>&1 || true
 
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
@@ -54,16 +54,15 @@ configure_base_system() {
     remote_copy "template_files/proxmox.sources" "/etc/apt/sources.list.d/proxmox.sources"
 
     # Basic system configuration
-    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
-    remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
-    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket"
+    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak" >/dev/null 2>&1
+    remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf" >/dev/null 2>&1
+    remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname" >/dev/null 2>&1
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket" >/dev/null 2>&1
 
     # Configure ZFS ARC memory limits
-    print_info "Configuring ZFS ARC memory limits..."
-    remote_exec_script << 'ZFSEOF'
+    remote_exec_with_progress "Configuring ZFS ARC memory limits" '
         # Get total RAM in bytes
-        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
         TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
         # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
@@ -85,28 +84,23 @@ configure_base_system() {
         mkdir -p /etc/modprobe.d
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
-
-        echo "ZFS ARC configured: min=$(($ARC_MIN / 1024 / 1024 / 1024))GB, max=$(($ARC_MAX / 1024 / 1024 / 1024))GB"
-ZFSEOF
+    '
 
     # Disable enterprise repositories
-    print_info "Disabling enterprise repositories..."
-    remote_exec_script << 'REPOEOF'
+    remote_exec_with_progress "Disabling enterprise repositories" '
         # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
                 mv "$repo_file" "${repo_file}.disabled"
-                echo "Disabled $(basename "$repo_file")"
             fi
         done
 
         # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
-            sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
-            echo "Commented out enterprise repos in sources.list"
+            sed -i "s|^deb.*enterprise.proxmox.com|# &|g" /etc/apt/sources.list
         fi
-REPOEOF
+    '
 
     # Update all system packages
     remote_exec_with_progress "Updating system packages" '
@@ -131,13 +125,12 @@ REPOEOF
     '
 
     # Install and configure zsh as default shell
-    print_info "Installing and configuring zsh..."
-    remote_exec_script << 'ZSHEOF'
+    remote_exec_with_progress "Installing and configuring ZSH" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting
 
         # Create minimal .zshrc for root
-        cat > /root/.zshrc << 'ZSHRC'
+        cat > /root/.zshrc << '\''ZSHRC'\''
 # Proxmox ZSH Configuration
 
 # History settings
@@ -151,16 +144,16 @@ setopt APPEND_HISTORY
 
 # Key bindings
 bindkey -e
-bindkey '^[[A' history-search-backward
-bindkey '^[[B' history-search-forward
-bindkey '^[[H' beginning-of-line
-bindkey '^[[F' end-of-line
-bindkey '^[[3~' delete-char
+bindkey '\''^[[A'\'' history-search-backward
+bindkey '\''^[[B'\'' history-search-forward
+bindkey '\''^[[H'\'' beginning-of-line
+bindkey '\''^[[F'\'' end-of-line
+bindkey '\''^[[3~'\'' delete-char
 
 # Completion
 autoload -Uz compinit && compinit
-zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle '\'':completion:*'\'' menu select
+zstyle '\'':completion:*'\'' matcher-list '\''m:{a-zA-Z}={A-Za-z}'\''
 
 # Colors
 autoload -Uz colors && colors
@@ -168,33 +161,33 @@ autoload -Uz colors && colors
 # Prompt with git branch support
 autoload -Uz vcs_info
 precmd() { vcs_info }
-zstyle ':vcs_info:git:*' formats ' (%b)'
+zstyle '\'':vcs_info:git:*'\'' formats '\'' (%b)'\''
 setopt PROMPT_SUBST
-PROMPT='%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '
+PROMPT='\''%F{cyan}%n@%m%f:%F{blue}%~%f%F{yellow}${vcs_info_msg_0_}%f %# '\''
 
 # Aliases
-alias ll='ls -lah --color=auto'
-alias la='ls -A --color=auto'
-alias l='ls -CF --color=auto'
-alias grep='grep --color=auto'
-alias df='df -h'
-alias du='du -h'
-alias free='free -h'
-alias ..='cd ..'
-alias ...='cd ../..'
+alias ll='\''ls -lah --color=auto'\''
+alias la='\''ls -A --color=auto'\''
+alias l='\''ls -CF --color=auto'\''
+alias grep='\''grep --color=auto'\''
+alias df='\''df -h'\''
+alias du='\''du -h'\''
+alias free='\''free -h'\''
+alias ..='\''cd ..'\''
+alias ...='\''cd ../..'\''
 
 # Proxmox aliases
-alias qml='qm list'
-alias pctl='pct list'
-alias pvesh='pvesh'
-alias zpl='zpool list'
-alias zst='zpool status'
+alias qml='\''qm list'\''
+alias pctl='\''pct list'\''
+alias pvesh='\''pvesh'\''
+alias zpl='\''zpool list'\''
+alias zst='\''zpool status'\''
 
 # Use bat instead of cat if available
-command -v bat &>/dev/null && alias cat='bat --paging=never'
+command -v bat &>/dev/null && alias cat='\''bat --paging=never'\''
 
 # Use btop instead of top if available
-command -v btop &>/dev/null && alias top='btop'
+command -v btop &>/dev/null && alias top='\''btop'\''
 
 # Load plugins if available
 [ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
@@ -203,15 +196,12 @@ command -v btop &>/dev/null && alias top='btop'
     source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Auto-suggestions color (gray)
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='\''fg=8'\''
 ZSHRC
 
         # Set zsh as default shell for root
         chsh -s /bin/zsh root
-
-        echo "ZSH installed and configured as default shell"
-ZSHEOF
-    print_success "ZSH configured as default shell"
+    '
 
     # Configure UTF-8 locales
     remote_exec_with_progress "Configuring UTF-8 locales" '
