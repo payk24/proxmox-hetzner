@@ -1728,6 +1728,9 @@ make_template_files() {
     # Security hardening templates
     download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
 
+    # ZSH configuration
+    download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+
     # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
     download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
@@ -1829,17 +1832,17 @@ REPOEOF
     '
 
     # Install monitoring and system utilities
-    remote_exec_with_progress "Installing monitoring utilities" '
+    remote_exec_with_progress "Installing system utilities" '
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
-            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
+        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat zsh zsh-autosuggestions zsh-syntax-highlighting 2>/dev/null || {
+            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat zsh zsh-autosuggestions zsh-syntax-highlighting; do
                 apt-get install -yqq "$pkg" 2>/dev/null || true
             done
         }
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     '
 
-    # Configure UTF-8 locales
+    # Configure UTF-8 locales (fix for btop and other apps)
     remote_exec_with_progress "Configuring UTF-8 locales" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq locales
@@ -1847,7 +1850,27 @@ REPOEOF
         sed -i "s/# ru_RU.UTF-8/ru_RU.UTF-8/" /etc/locale.gen
         locale-gen
         update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+        # Create locale profile for all shells (fixes btop display issues)
+        cat > /etc/profile.d/locale.sh << "LOCALEEOF"
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+LOCALEEOF
+        chmod +x /etc/profile.d/locale.sh
+
+        # Also set in /etc/default/locale for systemd services
+        cat > /etc/default/locale << "DEFLOCEOF"
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+LANGUAGE=en_US.UTF-8
+DEFLOCEOF
     '
+
+    # Configure ZSH as default shell for root
+    print_info "Configuring ZSH..."
+    remote_copy "template_files/zshrc" "/root/.zshrc"
+    remote_exec "chsh -s /bin/zsh root"
 
     # Configure nf_conntrack
     print_info "Configuring nf_conntrack..."
