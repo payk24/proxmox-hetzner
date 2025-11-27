@@ -218,7 +218,8 @@ validate_subnet() {
     fi
     # Validate each octet is 0-255
     local ip="${subnet%/*}"
-    IFS='.' read -ra octets <<< "$ip"
+    local IFS='.'
+    read -ra octets <<< "$ip"
     for octet in "${octets[@]}"; do
         if [ "$octet" -gt 255 ]; then
             return 1
