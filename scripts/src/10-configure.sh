@@ -163,7 +163,7 @@ ENVEOF
         systemctl stop chrony
     ' "NTP (chrony) installed"
     remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
-    remote_exec "systemctl enable chrony && systemctl start chrony"
+    remote_exec "systemctl enable chrony && systemctl start chrony" > /dev/null 2>&1
 
     # Configure dynamic MOTD
     (
@@ -181,7 +181,7 @@ ENVEOF
     ' "Unattended Upgrades installed"
     remote_copy "template_files/50unattended-upgrades" "/etc/apt/apt.conf.d/50unattended-upgrades"
     remote_copy "template_files/20auto-upgrades" "/etc/apt/apt.conf.d/20auto-upgrades"
-    remote_exec "systemctl enable unattended-upgrades"
+    remote_exec "systemctl enable unattended-upgrades" > /dev/null 2>&1
 
     # Configure nf_conntrack
     remote_exec_with_progress "Configuring nf_conntrack" '
