@@ -160,15 +160,12 @@ get_system_inputs() {
         done
 
         if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            local password_prompt="Enter your System New root password: "
+            local password_prompt="Enter new root password: "
             NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
                 echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
                 NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             done
-            # Move cursor up one line and overwrite with checkmark (same pattern as other inputs)
-            tput cuu1
-            printf "\r${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********\033[K\n"
         fi
 
         # =====================================================================
