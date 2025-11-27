@@ -116,9 +116,10 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    # Clear any remaining input in the buffer before reading password
-    # This fixes the issue where Enter from previous read -e remains in buffer
-    read -t 0.01 -n 10000 2>/dev/null || true
+    # Reset terminal state and clear input buffer before reading password
+    # read -e (readline) can leave terminal in a state that affects subsequent reads
+    stty sane 2>/dev/null || true
+    read -t 0.1 -n 10000 discard 2>/dev/null || true
 
     # Read password with asterisks displayed
     NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
