@@ -154,29 +154,45 @@ get_system_inputs() {
             local descriptions=("Survives 1 disk failure" "2x space & speed, data loss if any disk fails" "Uses first drive only, ignores other drives")
             local selected=0
             local key=""
+            local box_lines=0
 
-            # Save cursor position and hide cursor
-            tput sc
+            # Hide cursor
             tput civis
+
+            # Function to draw the selection box using boxes
+            draw_zfs_menu() {
+                local content=""
+                for i in "${!options[@]}"; do
+                    if [ $i -eq $selected ]; then
+                        content+="[*]|${labels[$i]}"$'\n'
+                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                    else
+                        content+="[ ]|${labels[$i]}"$'\n'
+                        content+="|  └─ ${descriptions[$i]}"$'\n'
+                    fi
+                done
+                # Remove trailing newline
+                content="${content%$'\n'}"
+
+                {
+                    echo "ZFS Storage Mode (↑/↓ select, Enter confirm)"
+                    echo "$content" | column -t -s '|'
+                } | boxes -d stone -p a1
+            }
+
+            # Count lines in the box for clearing later
+            box_lines=$(draw_zfs_menu | wc -l)
+
+            # Save cursor position
+            tput sc
 
             while true; do
                 # Move cursor to saved position
                 tput rc
 
-                # Draw the selection box
-                echo -e "${CLR_CYAN}┌─ ZFS Storage Mode (↑/↓ to select, Enter to confirm) ─┐${CLR_RESET}"
-                for i in "${!options[@]}"; do
-                    if [ $i -eq $selected ]; then
-                        # Selected item - highlighted
-                        echo -e "${CLR_CYAN}│${CLR_RESET} ${CLR_GREEN}●${CLR_RESET} ${CLR_WHITE}${labels[$i]}${CLR_RESET}"
-                        printf "%-55s${CLR_CYAN}│${CLR_RESET}\n" "     └─ ${descriptions[$i]}"
-                    else
-                        # Unselected item
-                        echo -e "${CLR_CYAN}│${CLR_RESET} ${CLR_BLUE}○${CLR_RESET} ${labels[$i]}"
-                        printf "%-55s${CLR_CYAN}│${CLR_RESET}\n" "     └─ ${descriptions[$i]}"
-                    fi
-                done
-                echo -e "${CLR_CYAN}└───────────────────────────────────────────────────────┘${CLR_RESET}"
+                # Draw the menu with colors
+                draw_zfs_menu | sed -e "s/\[\*\]/${CLR_GREEN}[●]${CLR_RESET}/g" \
+                                    -e "s/\[ \]/${CLR_BLUE}[○]${CLR_RESET}/g"
 
                 # Read a single keypress
                 IFS= read -rsn1 key
@@ -212,13 +228,15 @@ get_system_inputs() {
             # Set the selected ZFS RAID mode
             ZFS_RAID="${options[$selected]}"
 
-            # Clear the selection box (8 lines) and show confirmation
+            # Clear the selection box completely
             tput rc
-            for i in {1..8}; do
+            for ((i=0; i<box_lines; i++)); do
                 printf "\033[K\n"
             done
             tput rc
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${labels[$selected]}\033[K"
+
+            # Show confirmation
+            echo -e "${CLR_GREEN}✓${CLR_RESET} ZFS mode: ${labels[$selected]}"
         fi
     fi
 
