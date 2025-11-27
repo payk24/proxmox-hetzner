@@ -105,6 +105,58 @@ prompt_validated() {
     done
 }
 
+# Progress indicator with spinner and elapsed time
+show_progress() {
+    local pid=$1
+    local message="${2:-Processing}"
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local start_time=$(date +%s)
+    local i=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep 0.2
+    done
+
+    local total=$(($(date +%s) - start_time))
+    local mins=$((total / 60))
+    local secs=$((total % 60))
+    printf "\r${CLR_GREEN}✓ %s completed [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+}
+
+# Wait for condition with progress
+wait_with_progress() {
+    local message="$1"
+    local timeout="$2"
+    local check_cmd="$3"
+    local interval="${4:-5}"
+    local start_time=$(date +%s)
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+
+    while true; do
+        local elapsed=$(($(date +%s) - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+
+        if eval "$check_cmd" 2>/dev/null; then
+            printf "\r${CLR_GREEN}✓ %s [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 0
+        fi
+
+        if [ $elapsed -ge $timeout ]; then
+            printf "\r${CLR_RED}✗ %s timed out [%02d:%02d]${CLR_RESET}\n" "$message" "$mins" "$secs"
+            return 1
+        fi
+
+        printf "\r${CLR_YELLOW}${spinner:i++%${#spinner}:1} %s [%02d:%02d]${CLR_RESET}" "$message" "$mins" "$secs"
+        sleep "$interval"
+    done
+}
+
 # =============================================================================
 # Input validation functions
 # =============================================================================
@@ -600,14 +652,16 @@ install_proxmox() {
     setup_qemu_config
 
     echo -e "${CLR_YELLOW}Installing Proxmox VE (using $QEMU_CORES vCPUs, ${QEMU_RAM}MB RAM)${CLR_RESET}"
-    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
-    echo -e "${CLR_RED}Do NOT do anything, just wait about 5-10 min!${CLR_RESET}"
-    echo -e "${CLR_YELLOW}=================================${CLR_RESET}"
+    echo -e "${CLR_RED}Do NOT do anything, this takes about 5-10 minutes${CLR_RESET}"
+    echo ""
 
+    # Run QEMU in background and show progress
     qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -smp $QEMU_CORES -m $QEMU_RAM \
         -boot d -cdrom ./pve-autoinstall.iso \
-        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1
+        $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
+
+    show_progress $! "Installing Proxmox VE to disk"
 }
 
 # Boot installed Proxmox with SSH port forwarding
@@ -623,20 +677,9 @@ boot_proxmox_with_port_forwarding() {
         > qemu_output.log 2>&1 &
 
     QEMU_PID=$!
-    echo -e "${CLR_YELLOW}QEMU started with PID: $QEMU_PID${CLR_RESET}"
 
-    echo -e "${CLR_YELLOW}Waiting for SSH to become available...${CLR_RESET}"
-    for i in {1..60}; do
-        if (echo >/dev/tcp/localhost/5555) 2>/dev/null; then
-            echo -e "${CLR_GREEN}SSH is available on port 5555.${CLR_RESET}"
-            return 0
-        fi
-        echo -n "."
-        sleep 5
-    done
-
-    echo -e "${CLR_RED}SSH is not available after 5 minutes. Check the system manually.${CLR_RESET}"
-    return 1
+    # Wait for SSH with progress indicator (timeout 5 minutes)
+    wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
 }
 
 make_template_files() {
@@ -950,9 +993,7 @@ make_answer_toml
 make_autoinstall_iso
 install_proxmox
 
-echo -e "${CLR_YELLOW}Waiting for installation to complete...${CLR_RESET}"
-
-# Boot the installed Proxmox with port forwarding
+# Boot and configure via SSH
 boot_proxmox_with_port_forwarding || {
     echo -e "${CLR_RED}Failed to boot Proxmox with port forwarding. Exiting.${CLR_RESET}"
     exit 1
