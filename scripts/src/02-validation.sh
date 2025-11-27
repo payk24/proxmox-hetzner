@@ -35,15 +35,19 @@ validate_subnet() {
     if [[ ! "$subnet" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
         return 1
     fi
-    # Validate each octet is 0-255
+    # Validate each octet is 0-255 using parameter expansion (no read/IFS to avoid terminal issues)
     local ip="${subnet%/*}"
-    local IFS='.'
-    read -ra octets <<< "$ip"
-    for octet in "${octets[@]}"; do
-        if [ "$octet" -gt 255 ]; then
-            return 1
-        fi
-    done
+    local octet1 octet2 octet3 octet4 temp
+    octet1="${ip%%.*}"
+    temp="${ip#*.}"
+    octet2="${temp%%.*}"
+    temp="${temp#*.}"
+    octet3="${temp%%.*}"
+    octet4="${temp#*.}"
+
+    if [ "$octet1" -gt 255 ] || [ "$octet2" -gt 255 ] || [ "$octet3" -gt 255 ] || [ "$octet4" -gt 255 ]; then
+        return 1
+    fi
     return 0
 }
 
