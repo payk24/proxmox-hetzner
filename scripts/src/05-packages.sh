@@ -3,25 +3,35 @@
 # =============================================================================
 
 prepare_packages() {
-    echo -e "${CLR_BLUE}Installing packages...${CLR_RESET}"
-    echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" | tee /etc/apt/sources.list.d/pve.list
+    echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve.list
 
-    if ! curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg; then
+    # Download Proxmox GPG key
+    curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
+    show_progress $! "Downloading Proxmox GPG key"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to download Proxmox GPG key! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    if ! apt clean || ! apt update; then
+    # Update package lists
+    apt clean > /dev/null 2>&1
+    apt update > /dev/null 2>&1 &
+    show_progress $! "Updating package lists"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to update package lists! Exiting.${CLR_RESET}"
         exit 1
     fi
 
-    if ! apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass; then
+    # Install packages
+    apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
+    show_progress $! "Installing packages"
+    wait $!
+    if [ $? -ne 0 ]; then
         echo -e "${CLR_RED}Failed to install required packages! Exiting.${CLR_RESET}"
         exit 1
     fi
-
-    echo -e "${CLR_GREEN}Packages installed.${CLR_RESET}"
 }
 
 # Fetch latest Proxmox VE ISO
