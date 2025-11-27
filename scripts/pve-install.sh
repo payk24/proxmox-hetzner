@@ -339,20 +339,17 @@ get_system_inputs() {
 
     # Get user input for other configuration with validation
     while true; do
-        read -e -p "Enter your hostname : " -i "proxmox-example" HOSTNAME
+        read -e -p "Enter your hostname (e.g., pve, proxmox): " -i "pve" HOSTNAME
         if validate_hostname "$HOSTNAME"; then
             break
         fi
         echo -e "${CLR_RED}Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars, cannot start/end with hyphen).${CLR_RESET}"
     done
 
-    while true; do
-        read -e -p "Enter your FQDN name : " -i "proxmox.local" FQDN
-        if validate_fqdn "$FQDN"; then
-            break
-        fi
-        echo -e "${CLR_RED}Invalid FQDN. Use format: hostname.domain.tld${CLR_RESET}"
-    done
+    # Domain suffix for FQDN (hostname.domain)
+    read -e -p "Enter domain suffix: " -i "local" DOMAIN_SUFFIX
+    FQDN="${HOSTNAME}.${DOMAIN_SUFFIX}"
+    echo -e "${CLR_GREEN}FQDN: ${FQDN}${CLR_RESET}"
 
     while true; do
         read -e -p "Enter your timezone : " -i "Europe/Kyiv" TIMEZONE
