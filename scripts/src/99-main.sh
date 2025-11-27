@@ -53,9 +53,19 @@ reboot_to_main_os() {
         fi
     fi
 
+    # Display ASCII art header
+    echo ""
+    echo '  ___           _        _ _       _   _               ____                      _      _'
+    echo ' |_ _|_ __  ___| |_ __ _| | | __ _| |_(_) ___  _ __   / ___|___  _ __ ___  _ __ | | ___| |_ ___'
+    echo '  | ||  _ \/ __| __/ _` | | |/ _` | __| |/ _ \|  _ \ | |   / _ \|  _   _ \|  _ \| |/ _ \ __/ _ \'
+    echo '  | || | | \__ \ || (_| | | | (_| | |_| | (_) | | | || |__| (_) | | | | | | |_) | |  __/ ||  __/'
+    echo ' |___|_| |_|___/\__\__,_|_|_|\__,_|\__|_|\___/|_| |_| \____\___/|_| |_| |_| .__/|_|\___|\__\___|'
+    echo '                                                                          |_|'
+    echo ""
+
     # Display with boxes
     {
-        echo "INSTALLATION COMPLETE"
+        echo "INSTALLATION SUMMARY"
         echo "$summary" | column -t -s '|' | while IFS= read -r line; do
             printf "%-${inner_width}s\n" "$line"
         done
