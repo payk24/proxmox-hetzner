@@ -103,12 +103,6 @@ get_system_inputs() {
         BRIDGE_MODE="${BRIDGE_MODE:-internal}"
         PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
-        # Password handling in non-interactive mode
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
-            exit 1
-        fi
-
         # SSH Public Key in non-interactive mode
         if [[ -z "$SSH_PUBLIC_KEY" ]]; then
             # Try to get from rescue system
@@ -158,16 +152,6 @@ get_system_inputs() {
             fi
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
         done
-
-        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            local password_prompt="Enter your System New root password: "
-            NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
-                NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
-            done
-            echo -e "${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********"
-        fi
 
         # =====================================================================
         # SECTION 2: Interactive menus (all selection menus grouped together)
@@ -420,6 +404,24 @@ get_system_inputs() {
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
             echo -e "${CLR_GREEN}✓${CLR_RESET} Tailscale installation skipped"
+        fi
+    fi
+
+    # Password handling
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            echo -e "${CLR_RED}Error: NEW_ROOT_PASSWORD required in non-interactive mode${CLR_RESET}"
+            exit 1
+        fi
+    else
+        if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
+            local password_prompt="Enter your System New root password: "
+            NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
+            while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
+                echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+                NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
+            done
+            echo -e "${CLR_GREEN}✓${CLR_RESET} ${password_prompt}********"
         fi
     fi
 
