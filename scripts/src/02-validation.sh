@@ -4,68 +4,90 @@
 
 preflight_checks() {
     echo -e "${CLR_BLUE}Running pre-flight checks...${CLR_RESET}"
+    echo ""
     local errors=0
+
+    # Gather system information
+    local root_status="" root_color=""
+    local net_status="" net_color=""
+    local disk_status="" disk_color=""
+    local ram_status="" ram_color=""
+    local cpu_status="" cpu_color=""
+    local kvm_status="" kvm_color=""
 
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${CLR_RED}✗ Must run as root${CLR_RESET}"
+        root_status="✗ Not root"
+        root_color="${CLR_RED}"
         errors=$((errors + 1))
     else
-        echo -e "${CLR_GREEN}✓ Running as root${CLR_RESET}"
+        root_status="✓ Running as root"
+        root_color="${CLR_GREEN}"
     fi
 
     # Check internet connectivity
     if ping -c 1 -W 3 1.1.1.1 > /dev/null 2>&1; then
-        echo -e "${CLR_GREEN}✓ Internet connection available${CLR_RESET}"
+        net_status="✓ Available"
+        net_color="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ No internet connection${CLR_RESET}"
+        net_status="✗ No connection"
+        net_color="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check available disk space (need at least 5GB in /root)
     local free_space_mb=$(df -m /root | awk 'NR==2 {print $4}')
     if [[ $free_space_mb -ge 5000 ]]; then
-        echo -e "${CLR_GREEN}✓ Disk space: ${free_space_mb}MB available${CLR_RESET}"
+        disk_status="✓ ${free_space_mb} MB"
+        disk_color="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient disk space: ${free_space_mb}MB (need 5GB+)${CLR_RESET}"
+        disk_status="✗ ${free_space_mb} MB (need 5GB+)"
+        disk_color="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check RAM (need at least 4GB)
     local total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     if [[ $total_ram_mb -ge 4000 ]]; then
-        echo -e "${CLR_GREEN}✓ RAM: ${total_ram_mb}MB available${CLR_RESET}"
+        ram_status="✓ ${total_ram_mb} MB"
+        ram_color="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ Insufficient RAM: ${total_ram_mb}MB (need 4GB+)${CLR_RESET}"
+        ram_status="✗ ${total_ram_mb} MB (need 4GB+)"
+        ram_color="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
     # Check CPU cores
     local cpu_cores=$(nproc)
     if [[ $cpu_cores -ge 2 ]]; then
-        echo -e "${CLR_GREEN}✓ CPU: ${cpu_cores} cores${CLR_RESET}"
+        cpu_status="✓ ${cpu_cores} cores"
+        cpu_color="${CLR_GREEN}"
     else
-        echo -e "${CLR_YELLOW}⚠ CPU: ${cpu_cores} core(s) - minimum 2 recommended${CLR_RESET}"
+        cpu_status="⚠ ${cpu_cores} core(s)"
+        cpu_color="${CLR_YELLOW}"
     fi
 
     # Check if KVM is available
     if [[ -e /dev/kvm ]]; then
-        echo -e "${CLR_GREEN}✓ KVM virtualization available${CLR_RESET}"
+        kvm_status="✓ Available"
+        kvm_color="${CLR_GREEN}"
     else
-        echo -e "${CLR_RED}✗ KVM not available (required for installation)${CLR_RESET}"
+        kvm_status="✗ Not available"
+        kvm_color="${CLR_RED}"
         errors=$((errors + 1))
     fi
 
-    # Check required commands
-    for cmd in curl wget ip; do
-        if command -v $cmd > /dev/null 2>&1; then
-            echo -e "${CLR_GREEN}✓ Command '$cmd' available${CLR_RESET}"
-        else
-            echo -e "${CLR_RED}✗ Command '$cmd' not found${CLR_RESET}"
-            errors=$((errors + 1))
-        fi
-    done
-
+    # Print table
+    echo -e "┌───────────────────┬────────────────────────────┐"
+    echo -e "│ ${CLR_CYAN}Check${CLR_RESET}             │ ${CLR_CYAN}Status${CLR_RESET}                     │"
+    echo -e "├───────────────────┼────────────────────────────┤"
+    printf "│ %-17s │ ${root_color}%-19s${CLR_RESET}        │\n" "Root Access" "$root_status"
+    printf "│ %-17s │ ${net_color}%-19s${CLR_RESET}        │\n" "Internet" "$net_status"
+    printf "│ %-17s │ ${disk_color}%-19s${CLR_RESET}        │\n" "Disk Space" "$disk_status"
+    printf "│ %-17s │ ${ram_color}%-19s${CLR_RESET}        │\n" "RAM" "$ram_status"
+    printf "│ %-17s │ ${cpu_color}%-19s${CLR_RESET}        │\n" "CPU" "$cpu_status"
+    printf "│ %-17s │ ${kvm_color}%-19s${CLR_RESET}        │\n" "KVM" "$kvm_status"
+    echo -e "└───────────────────┴────────────────────────────┘"
     echo ""
 
     if [[ $errors -gt 0 ]]; then
