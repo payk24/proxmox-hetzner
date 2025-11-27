@@ -402,7 +402,9 @@ get_system_inputs() {
     done
 
     while true; do
-        read -e -p "Enter your private subnet : " -i "10.0.0.0/24" PRIVATE_SUBNET
+        echo -n "Enter your private subnet [10.0.0.0/24]: "
+        read PRIVATE_SUBNET
+        PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
         if validate_subnet "$PRIVATE_SUBNET"; then
             break
         fi
