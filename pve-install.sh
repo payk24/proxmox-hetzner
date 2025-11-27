@@ -1023,15 +1023,46 @@ get_system_inputs() {
         read -e -p "$domain_prompt" -i "${DOMAIN_SUFFIX:-local}" DOMAIN_SUFFIX
         printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${domain_prompt}${DOMAIN_SUFFIX}\033[K\n"
 
-        local tz_prompt="Enter your timezone: "
-        while true; do
-            read -e -p "$tz_prompt" -i "${TIMEZONE:-Europe/Kyiv}" TIMEZONE
-            if validate_timezone "$TIMEZONE"; then
-                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${tz_prompt}${TIMEZONE}\033[K\n"
+        # Timezone selection with interactive menu
+        local tz_options=("Europe/Kyiv" "Europe/London" "Europe/Berlin" "America/New_York" "America/Los_Angeles" "Asia/Tokyo" "UTC" "custom")
+        local tz_default="${TIMEZONE:-Europe/Kyiv}"
+        local tz_default_idx=0
+
+        # Find default timezone index
+        for i in "${!tz_options[@]}"; do
+            if [[ "${tz_options[$i]}" == "$tz_default" ]]; then
+                tz_default_idx=$i
                 break
             fi
-            echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York, Asia/Tokyo${CLR_RESET}"
         done
+
+        interactive_menu \
+            "Timezone (↑/↓ select, Enter confirm)" \
+            "" \
+            "Europe/Kyiv|Ukraine" \
+            "Europe/London|United Kingdom (GMT/BST)" \
+            "Europe/Berlin|Germany, Central Europe (CET/CEST)" \
+            "America/New_York|US Eastern Time (EST/EDT)" \
+            "America/Los_Angeles|US Pacific Time (PST/PDT)" \
+            "Asia/Tokyo|Japan Standard Time (JST)" \
+            "UTC|Coordinated Universal Time" \
+            "Custom|Enter timezone manually"
+
+        if [[ $MENU_SELECTED -eq 7 ]]; then
+            # Custom timezone - prompt for manual entry
+            local tz_prompt="Enter your timezone: "
+            while true; do
+                read -e -p "$tz_prompt" -i "$tz_default" TIMEZONE
+                if validate_timezone "$TIMEZONE"; then
+                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}\033[K\n"
+                    break
+                fi
+                echo -e "${CLR_RED}Invalid timezone. Use format like: Europe/London, America/New_York${CLR_RESET}"
+            done
+        else
+            TIMEZONE="${tz_options[$MENU_SELECTED]}"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Timezone: ${TIMEZONE}"
+        fi
 
         local email_prompt="Enter your email address: "
         while true; do
@@ -1043,15 +1074,33 @@ get_system_inputs() {
             echo -e "${CLR_RED}Invalid email address format.${CLR_RESET}"
         done
 
-        local subnet_prompt="Enter your private subnet: "
-        while true; do
-            read -e -p "$subnet_prompt" -i "${PRIVATE_SUBNET:-10.0.0.0/24}" PRIVATE_SUBNET
-            if validate_subnet "$PRIVATE_SUBNET"; then
-                printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} ${subnet_prompt}${PRIVATE_SUBNET}\033[K\n"
-                break
-            fi
-            echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
-        done
+        # Private subnet selection with interactive menu
+        local subnet_options=("10.0.0.0/24" "192.168.1.0/24" "172.16.0.0/24" "custom")
+        local subnet_default="${PRIVATE_SUBNET:-10.0.0.0/24}"
+
+        interactive_menu \
+            "Private Subnet (↑/↓ select, Enter confirm)" \
+            "Internal network for VMs and containers" \
+            "10.0.0.0/24|Class A private (recommended)" \
+            "192.168.1.0/24|Class C private (common home network)" \
+            "172.16.0.0/24|Class B private" \
+            "Custom|Enter subnet manually"
+
+        if [[ $MENU_SELECTED -eq 3 ]]; then
+            # Custom subnet - prompt for manual entry
+            local subnet_prompt="Enter your private subnet: "
+            while true; do
+                read -e -p "$subnet_prompt" -i "$subnet_default" PRIVATE_SUBNET
+                if validate_subnet "$PRIVATE_SUBNET"; then
+                    printf "\033[A\r${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}\033[K\n"
+                    break
+                fi
+                echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
+            done
+        else
+            PRIVATE_SUBNET="${subnet_options[$MENU_SELECTED]}"
+            echo -e "${CLR_GREEN}✓${CLR_RESET} Private subnet: ${PRIVATE_SUBNET}"
+        fi
 
         # ZFS RAID mode selection (only if 2+ drives detected)
         if [ "${NVME_COUNT:-0}" -ge 2 ]; then
