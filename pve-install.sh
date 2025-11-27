@@ -383,6 +383,7 @@ SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 show_progress() {
     local pid=$1
     local message="${2:-Processing}"
+    local done_message="${3:-$message}"
     local i=0
 
     while kill -0 "$pid" 2>/dev/null; do
@@ -390,7 +391,7 @@ show_progress() {
         sleep 0.2
     done
 
-    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
+    printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
 }
 
 # Wait for condition with progress
@@ -399,6 +400,7 @@ wait_with_progress() {
     local timeout="$2"
     local check_cmd="$3"
     local interval="${4:-5}"
+    local done_message="${5:-$message}"
     local start_time=$(date +%s)
     local i=0
 
@@ -406,7 +408,7 @@ wait_with_progress() {
         local elapsed=$(($(date +%s) - start_time))
 
         if eval "$check_cmd" 2>/dev/null; then
-            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$message"
+            printf "\r${CLR_GREEN}✓ %s${CLR_RESET}                    \n" "$done_message"
             return 0
         fi
 
@@ -454,10 +456,11 @@ remote_exec_script() {
 remote_exec_with_progress() {
     local message="$1"
     local script="$2"
+    local done_message="${3:-$message}"
 
     echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
     local pid=$!
-    show_progress $pid "$message"
+    show_progress $pid "$message" "$done_message"
     wait $pid
     return $?
 }
@@ -1499,7 +1502,7 @@ prepare_packages() {
 
     # Download Proxmox GPG key
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
-    show_progress $! "Downloading Proxmox GPG key"
+    show_progress $! "Downloading Proxmox GPG key" "Proxmox GPG key downloaded"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to download Proxmox GPG key! Exiting."
@@ -1509,7 +1512,7 @@ prepare_packages() {
     # Update package lists
     apt clean > /dev/null 2>&1
     apt update > /dev/null 2>&1 &
-    show_progress $! "Updating package lists"
+    show_progress $! "Updating package lists" "Package lists updated"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to update package lists! Exiting."
@@ -1518,7 +1521,7 @@ prepare_packages() {
 
     # Install packages
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
-    show_progress $! "Installing packages"
+    show_progress $! "Installing required packages" "Required packages installed"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to install required packages! Exiting."
@@ -1556,7 +1559,7 @@ download_proxmox_iso() {
 
     # Download ISO with progress spinner (silent wget)
     wget -q -O pve.iso "$PROXMOX_ISO_URL" 2>/dev/null &
-    show_progress $! "Downloading $ISO_FILENAME"
+    show_progress $! "Downloading $ISO_FILENAME" "$ISO_FILENAME downloaded"
     wait $!
     if [[ $? -ne 0 ]]; then
         print_error "Failed to download Proxmox ISO! Exiting."
@@ -1576,7 +1579,7 @@ download_proxmox_iso() {
         EXPECTED_CHECKSUM=$(grep "$ISO_FILENAME" SHA256SUMS | awk '{print $1}')
         if [[ -n "$EXPECTED_CHECKSUM" ]]; then
             sha256sum pve.iso > /tmp/iso_checksum.txt 2>/dev/null &
-            show_progress $! "Verifying ISO checksum"
+            show_progress $! "Verifying ISO checksum" "ISO checksum verified"
             wait $!
             ACTUAL_CHECKSUM=$(cat /tmp/iso_checksum.txt | awk '{print $1}')
             rm -f /tmp/iso_checksum.txt
@@ -1635,7 +1638,7 @@ EOF
 
 make_autoinstall_iso() {
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso > /dev/null 2>&1 &
-    show_progress $! "Creating autoinstall ISO"
+    show_progress $! "Creating autoinstall ISO" "Autoinstall ISO created"
 
     # Remove original ISO to save disk space (only autoinstall ISO is needed)
     rm -f pve.iso
@@ -1655,10 +1658,8 @@ setup_qemu_config() {
     # UEFI configuration
     if is_uefi_mode; then
         UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
-        print_info "UEFI mode detected"
     else
         UEFI_OPTS=""
-        print_info "Legacy BIOS mode"
     fi
 
     # CPU and RAM configuration
@@ -1688,12 +1689,11 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)"
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed"
 }
 
 # Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
-    print_success "Booting installed Proxmox with SSH port forwarding..."
     setup_qemu_config
 
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
@@ -1706,7 +1706,7 @@ boot_proxmox_with_port_forwarding() {
     QEMU_PID=$!
 
     # Wait for SSH with progress indicator (timeout 5 minutes)
-    wait_with_progress "Waiting for Proxmox to boot" 300 "(echo >/dev/tcp/localhost/5555)" 3
+    wait_with_progress "Booting installed Proxmox" 300 "(echo >/dev/tcp/localhost/5555)" 3 "Proxmox booted, SSH available"
 }
 
 # --- 10-configure.sh ---
@@ -1715,59 +1715,44 @@ boot_proxmox_with_port_forwarding() {
 # =============================================================================
 
 make_template_files() {
-    print_info "Modifying template files..."
-
-    print_info "Downloading template files..."
     mkdir -p ./template_files
-
-    download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
-    download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
-    download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
-    download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
-
-    # Security hardening templates
-    download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
-
-    # ZSH configuration
-    download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
-
-    # NTP configuration
-    download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
-
-    # MOTD configuration
-    download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
-
-    # Unattended upgrades configuration
-    download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
-    download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
-
-    # Download interfaces template based on bridge mode
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
-    download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
 
-    # Process hosts file
-    print_info "Processing hosts file..."
-    sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
-    sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
-    sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
+    # Download template files in background with progress
+    (
+        download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
+        download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
+        download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
+        download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
+        download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
+        download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+        download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
+        download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
+        download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
+        download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
+        download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Downloading template files"
 
-    # Process interfaces file
-    print_info "Processing interfaces file (mode: ${BRIDGE_MODE:-internal})..."
-    sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
-    sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
-    sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
-    sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
-
-    print_success "Template files modified"
+    # Modify template files in background with progress
+    (
+        sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/hosts
+        sed -i "s|{{FQDN}}|$FQDN|g" ./template_files/hosts
+        sed -i "s|{{HOSTNAME}}|$PVE_HOSTNAME|g" ./template_files/hosts
+        sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/hosts
+        sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV4}}|$MAIN_IPV4|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV4_GW}}|$MAIN_IPV4_GW|g" ./template_files/interfaces
+        sed -i "s|{{MAIN_IPV6}}|$MAIN_IPV6|g" ./template_files/interfaces
+        sed -i "s|{{PRIVATE_IP_CIDR}}|$PRIVATE_IP_CIDR|g" ./template_files/interfaces
+        sed -i "s|{{PRIVATE_SUBNET}}|$PRIVATE_SUBNET|g" ./template_files/interfaces
+        sed -i "s|{{FIRST_IPV6_CIDR}}|$FIRST_IPV6_CIDR|g" ./template_files/interfaces
+    ) &
+    show_progress $! "Modifying template files"
 }
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
-    print_info "Starting post-installation configuration via SSH..."
     make_template_files
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
@@ -1785,38 +1770,31 @@ configure_proxmox_via_ssh() {
     remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
 
     # Configure ZFS ARC memory limits
-    print_info "Configuring ZFS ARC memory limits..."
-    remote_exec_script << 'ZFSEOF'
-        # Get total RAM in bytes
-        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    remote_exec_with_progress "Configuring ZFS ARC memory limits" '
+        TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk "{print \$2}")
         TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
 
-        # Calculate ARC limits (min: 1GB or 10% of RAM, max: 50% of RAM)
         if [ $TOTAL_RAM_GB -ge 128 ]; then
-            ARC_MIN=$((16 * 1024 * 1024 * 1024))  # 16GB min for 128GB+ systems
-            ARC_MAX=$((64 * 1024 * 1024 * 1024))  # 64GB max
+            ARC_MIN=$((16 * 1024 * 1024 * 1024))
+            ARC_MAX=$((64 * 1024 * 1024 * 1024))
         elif [ $TOTAL_RAM_GB -ge 64 ]; then
-            ARC_MIN=$((8 * 1024 * 1024 * 1024))   # 8GB min
-            ARC_MAX=$((32 * 1024 * 1024 * 1024))  # 32GB max
+            ARC_MIN=$((8 * 1024 * 1024 * 1024))
+            ARC_MAX=$((32 * 1024 * 1024 * 1024))
         elif [ $TOTAL_RAM_GB -ge 32 ]; then
-            ARC_MIN=$((4 * 1024 * 1024 * 1024))   # 4GB min
-            ARC_MAX=$((16 * 1024 * 1024 * 1024))  # 16GB max
+            ARC_MIN=$((4 * 1024 * 1024 * 1024))
+            ARC_MAX=$((16 * 1024 * 1024 * 1024))
         else
-            ARC_MIN=$((1 * 1024 * 1024 * 1024))   # 1GB min
-            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))  # 50% of RAM max
+            ARC_MIN=$((1 * 1024 * 1024 * 1024))
+            ARC_MAX=$((TOTAL_RAM_KB * 1024 / 2))
         fi
 
-        # Create ZFS configuration
         mkdir -p /etc/modprobe.d
         echo "options zfs zfs_arc_min=$ARC_MIN" > /etc/modprobe.d/zfs.conf
         echo "options zfs zfs_arc_max=$ARC_MAX" >> /etc/modprobe.d/zfs.conf
-
-ZFSEOF
+    ' "ZFS ARC memory limits configured"
 
     # Disable enterprise repositories
-    print_info "Disabling enterprise repositories..."
-    remote_exec_script << 'REPOEOF'
-        # Disable ALL enterprise repositories (PVE, Ceph, Ceph-Squid, etc.)
+    remote_exec_with_progress "Disabling enterprise repositories" '
         for repo_file in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$repo_file" ] || continue
             if grep -q "enterprise.proxmox.com" "$repo_file" 2>/dev/null; then
@@ -1824,11 +1802,10 @@ ZFSEOF
             fi
         done
 
-        # Also check and disable any enterprise sources in main sources.list
         if [ -f /etc/apt/sources.list ] && grep -q "enterprise.proxmox.com" /etc/apt/sources.list 2>/dev/null; then
-            sed -i 's|^deb.*enterprise.proxmox.com|# &|g' /etc/apt/sources.list
+            sed -i "s|^deb.*enterprise.proxmox.com|# &|g" /etc/apt/sources.list
         fi
-REPOEOF
+    ' "Enterprise repositories disabled"
 
     # Update all system packages
     remote_exec_with_progress "Updating system packages" '
@@ -1839,7 +1816,7 @@ REPOEOF
         apt-get clean
         pveupgrade 2>/dev/null || true
         pveam update 2>/dev/null || true
-    '
+    ' "System packages updated"
 
     # Install monitoring and system utilities
     remote_exec_with_progress "Installing system utilities" '
@@ -1850,7 +1827,7 @@ REPOEOF
             done
         }
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
-    '
+    ' "System utilities installed"
 
     # Configure UTF-8 locales (fix for btop and other apps)
     remote_exec_with_progress "Configuring UTF-8 locales" '
@@ -1875,52 +1852,60 @@ LANG=en_US.UTF-8
 LC_ALL=en_US.UTF-8
 LANGUAGE=en_US.UTF-8
 DEFLOCEOF
-    '
+
+        # Set in /etc/environment for PAM (all sessions including non-login)
+        cat > /etc/environment << "ENVEOF"
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+LANGUAGE=en_US.UTF-8
+ENVEOF
+    ' "UTF-8 locales configured"
 
     # Configure ZSH as default shell for root
-    print_info "Configuring ZSH..."
-    remote_copy "template_files/zshrc" "/root/.zshrc"
-    remote_exec "chsh -s /bin/zsh root"
+    (
+        remote_copy "template_files/zshrc" "/root/.zshrc"
+        remote_exec "chsh -s /bin/zsh root"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Configuring ZSH" "ZSH configured"
 
     # Configure NTP time synchronization with chrony
-    remote_exec_with_progress "Installing and configuring NTP (chrony)" '
+    remote_exec_with_progress "Installing NTP (chrony)" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq chrony
         systemctl stop chrony
-    '
+    ' "NTP (chrony) installed"
     remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
     remote_exec "systemctl enable chrony && systemctl start chrony"
 
     # Configure dynamic MOTD
-    print_info "Configuring dynamic MOTD..."
-    remote_exec "rm -f /etc/motd"
-    remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
-    remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
-    remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
+    (
+        remote_exec "rm -f /etc/motd"
+        remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
+        remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
+        remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Configuring dynamic MOTD" "Dynamic MOTD configured"
 
     # Configure Unattended Upgrades (security updates, kernel excluded)
-    remote_exec_with_progress "Installing and configuring Unattended Upgrades" '
+    remote_exec_with_progress "Installing Unattended Upgrades" '
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -yqq unattended-upgrades apt-listchanges
-    '
+    ' "Unattended Upgrades installed"
     remote_copy "template_files/50unattended-upgrades" "/etc/apt/apt.conf.d/50unattended-upgrades"
     remote_copy "template_files/20auto-upgrades" "/etc/apt/apt.conf.d/20auto-upgrades"
     remote_exec "systemctl enable unattended-upgrades"
 
     # Configure nf_conntrack
-    print_info "Configuring nf_conntrack..."
-    remote_exec_script << 'CONNTRACKEOF'
-        # Add nf_conntrack module to load at boot
+    remote_exec_with_progress "Configuring nf_conntrack" '
         if ! grep -q "nf_conntrack" /etc/modules 2>/dev/null; then
             echo "nf_conntrack" >> /etc/modules
         fi
 
-        # Configure connection tracking limits
         if ! grep -q "nf_conntrack_max" /etc/sysctl.d/99-proxmox.conf 2>/dev/null; then
             echo "net.netfilter.nf_conntrack_max=1048576" >> /etc/sysctl.d/99-proxmox.conf
             echo "net.netfilter.nf_conntrack_tcp_timeout_established=28800" >> /etc/sysctl.d/99-proxmox.conf
         fi
-CONNTRACKEOF
+    ' "nf_conntrack configured"
 
     # Configure CPU governor
     remote_exec_with_progress "Configuring CPU governor" '
@@ -1931,16 +1916,15 @@ CONNTRACKEOF
                 [ -f "$cpu" ] && echo "performance" > "$cpu" 2>/dev/null || true
             done
         fi
-    '
+    ' "CPU governor configured"
 
     # Remove Proxmox subscription notice
-    print_info "Removing Proxmox subscription notice..."
-    remote_exec_script << 'SUBEOF'
+    remote_exec_with_progress "Removing Proxmox subscription notice" '
         if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
             systemctl restart pveproxy.service
         fi
-SUBEOF
+    ' "Subscription notice removed"
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -1951,7 +1935,7 @@ SUBEOF
             apt-get install -yqq tailscale
             systemctl enable tailscaled
             systemctl start tailscaled
-        '
+        ' "Tailscale VPN installed"
 
         # Build tailscale up command with selected options
         TAILSCALE_UP_CMD="tailscale up"
@@ -1964,19 +1948,24 @@ SUBEOF
 
         # If auth key is provided, authenticate Tailscale
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
-            print_info "Authenticating Tailscale with provided auth key..."
-            remote_exec "$TAILSCALE_UP_CMD"
+            (
+                remote_exec "$TAILSCALE_UP_CMD"
+                remote_exec "tailscale ip -4" > /tmp/tailscale_ip.txt 2>/dev/null
+                remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " > /tmp/tailscale_hostname.txt 2>/dev/null
+            ) > /dev/null 2>&1 &
+            show_progress $! "Authenticating Tailscale"
 
             # Get Tailscale IP and hostname for display
-            TAILSCALE_IP=$(remote_exec "tailscale ip -4" 2>/dev/null || echo "pending")
-            TAILSCALE_HOSTNAME=$(remote_exec "tailscale status --json | grep -o '\"DNSName\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 | sed 's/\\.$//' " 2>/dev/null || echo "")
-            print_success "Tailscale authenticated. IP: ${TAILSCALE_IP}"
+            TAILSCALE_IP=$(cat /tmp/tailscale_ip.txt 2>/dev/null || echo "pending")
+            TAILSCALE_HOSTNAME=$(cat /tmp/tailscale_hostname.txt 2>/dev/null || echo "")
+            rm -f /tmp/tailscale_ip.txt /tmp/tailscale_hostname.txt
+            # Overwrite completion line with IP
+            printf "\033[1A\r${CLR_GREEN}✓ Tailscale authenticated. IP: ${TAILSCALE_IP}${CLR_RESET}                              \n"
 
             # Configure Tailscale Serve for Proxmox Web UI
             if [[ "$TAILSCALE_WEBUI" == "yes" ]]; then
-                print_info "Configuring Tailscale Serve for Proxmox Web UI..."
-                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" >/dev/null 2>&1
-                print_success "Proxmox Web UI available via Tailscale Serve"
+                remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" > /dev/null 2>&1 &
+                show_progress $! "Configuring Tailscale Serve" "Proxmox Web UI available via Tailscale Serve"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -1989,23 +1978,19 @@ SUBEOF
     fi
 
     # Deploy SSH hardening LAST (after all other operations)
-    print_info "Deploying SSH hardening..."
-
-    # Deploy SSH public key FIRST (before disabling password auth!)
-    remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-    remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-    remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-
-    print_success "Security hardening configured"
+    (
+        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Deploying SSH hardening" "Security hardening configured"
 
     # Power off the VM
-    print_info "Powering off the VM..."
-    remote_exec "poweroff" || true
+    remote_exec "poweroff" > /dev/null 2>&1 &
+    show_progress $! "Powering off the VM"
 
     # Wait for QEMU to exit
-    print_info "Waiting for QEMU process to exit..."
-    wait $QEMU_PID || true
-    print_success "QEMU process exited"
+    wait_with_progress "Waiting for QEMU process to exit" 120 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"
 }
 
 # --- 99-main.sh ---
