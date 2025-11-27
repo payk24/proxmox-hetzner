@@ -160,7 +160,7 @@ get_system_inputs() {
         done
 
         if [[ -z "$NEW_ROOT_PASSWORD" ]]; then
-            local password_prompt="Enter new root password: "
+            local password_prompt="Enter your System New root password: "
             NEW_ROOT_PASSWORD=$(read_password "$password_prompt")
             while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
                 echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
