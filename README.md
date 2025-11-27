@@ -90,6 +90,7 @@ The installation script automatically applies the following optimizations:
 - CPU governor set to performance mode
 - Subscription notice removed
 - Enterprise repositories disabled (no subscription required)
+- Ceph UI hidden (not needed for single-server setup)
 
 > **Note:** After installation, you may want to run `apt update && apt upgrade` to get the latest package updates.
 
