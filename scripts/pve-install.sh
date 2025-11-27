@@ -36,6 +36,36 @@ download_file() {
     exit 1
 }
 
+# Function to read password with asterisks shown for each character
+read_password() {
+    local prompt="$1"
+    local password=""
+    local char=""
+
+    echo -n "$prompt"
+
+    while IFS= read -r -s -n1 char; do
+        # Check for Enter key (empty char)
+        if [[ -z "$char" ]]; then
+            break
+        fi
+        # Check for Backspace (ASCII 127 or 8)
+        if [[ "$char" == $'\x7f' || "$char" == $'\x08' ]]; then
+            if [[ -n "$password" ]]; then
+                password="${password%?}"
+                # Move cursor back, overwrite with space, move back again
+                echo -ne "\b \b"
+            fi
+        else
+            password+="$char"
+            echo -n "*"
+        fi
+    done
+
+    echo ""
+    echo "$password"
+}
+
 # Input validation functions
 validate_hostname() {
     local hostname="$1"
@@ -253,8 +283,8 @@ get_system_inputs() {
         echo -e "${CLR_RED}Invalid subnet. Use CIDR format like: 10.0.0.0/24, 192.168.1.0/24${CLR_RESET}"
     done
 
-    read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-    echo ""
+    # Read password with asterisks displayed
+    NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
 
     # Get the network prefix (first three octets) from PRIVATE_SUBNET
     PRIVATE_CIDR=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f1 | rev | cut -d'.' -f2- | rev)
@@ -264,12 +294,11 @@ get_system_inputs() {
     SUBNET_MASK=$(echo "$PRIVATE_SUBNET" | cut -d'/' -f2)
     # Create the full CIDR notation for the first IP
     PRIVATE_IP_CIDR="${PRIVATE_IP}/${SUBNET_MASK}"
-    
+
     # Check password was not empty, do it in loop until password is not empty
     while [[ -z "$NEW_ROOT_PASSWORD" ]]; do
-        # Print message in a new line
-        read -e -s -p "Enter your System New root password: " NEW_ROOT_PASSWORD
-        echo ""
+        echo -e "${CLR_RED}Password cannot be empty!${CLR_RESET}"
+        NEW_ROOT_PASSWORD=$(read_password "Enter your System New root password: ")
     done
 
     echo ""
