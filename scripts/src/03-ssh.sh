@@ -7,21 +7,32 @@ SSH_PORT="5555"
 
 # Wait for SSH to be fully ready (not just TCP port open)
 # This performs an actual SSH connection test, not just a TCP check
+# Shows spinner for user feedback
 wait_for_ssh_ready() {
-    local max_attempts="${1:-30}"
+    local max_attempts="${1:-60}"
+    local message="${2:-Connecting to VM via SSH}"
+    local done_message="${3:-SSH connection established}"
     local attempt=1
+    local i=0
 
     log "Waiting for SSH to be fully ready (max $max_attempts attempts)"
+
     while [[ $attempt -le $max_attempts ]]; do
+        # Show spinner
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
+
         if sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "exit 0" 2>/dev/null; then
+            printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
             log "SSH is fully ready after $attempt attempt(s)"
             return 0
         fi
+
         log "SSH not ready yet (attempt $attempt/$max_attempts)"
         sleep 2
         ((attempt++))
     done
 
+    printf "\r\e[K${CLR_RED}✗ SSH connection failed after $max_attempts attempts${CLR_RESET}\n"
     log "ERROR: SSH failed to become ready after $max_attempts attempts"
     return 1
 }
