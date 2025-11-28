@@ -139,8 +139,8 @@ configure_proxmox_via_ssh() {
 
         remote_exec_with_progress "Installing Oh-My-Zsh" '
             export DEBIAN_FRONTEND=noninteractive
-            # Install Oh-My-Zsh unattended
-            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+            # Install Oh-My-Zsh unattended (|| true because chsh may fail in chroot/VM)
+            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended || true
         ' "Oh-My-Zsh installed"
 
         remote_exec_with_progress "Installing Powerlevel10k theme" '
