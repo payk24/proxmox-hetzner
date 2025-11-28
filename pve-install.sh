@@ -383,25 +383,18 @@ prompt_validated() {
 SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
 # Progress indicator with spinner
-# Returns the exit code of the background process (use || true if you don't care about failures)
 show_progress() {
     local pid=$1
     local message="${2:-Processing}"
     local done_message="${3:-$message}"
     local i=0
-    local exit_code=0
 
     while kill -0 "$pid" 2>/dev/null; do
         printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
         sleep 0.2
     done
 
-    # Collect exit code from background process
-    wait "$pid" 2>/dev/null
-    exit_code=$?
-
     printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
-    return $exit_code
 }
 
 # Wait for condition with progress
@@ -471,7 +464,8 @@ remote_exec_with_progress() {
     echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
     local pid=$!
     show_progress $pid "$message" "$done_message"
-    # show_progress already does wait and returns exit code
+    wait $pid
+    return $?
 }
 
 remote_copy() {
@@ -1769,8 +1763,7 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    # QEMU returns non-zero exit code when VM powers off with -no-reboot, ignore it
-    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed" || true
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed"
 }
 
 # Boot installed Proxmox with SSH port forwarding
@@ -2151,7 +2144,7 @@ ENVEOF
     # Sync filesystem and power off the VM (ignore exit code - SSH connection closes when VM shuts down)
     remote_exec "sync" > /dev/null 2>&1
     remote_exec "poweroff" > /dev/null 2>&1 &
-    show_progress $! "Powering off the VM" || true
+    show_progress $! "Powering off the VM"
 
     # Wait for QEMU to exit (with fallback to force kill)
     if ! wait_with_progress "Waiting for QEMU process to exit" 60 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"; then
