@@ -159,6 +159,10 @@ get_inputs_non_interactive() {
     else
         print_success "Tailscale: skipped"
     fi
+
+    # Default Shell
+    DEFAULT_SHELL="${DEFAULT_SHELL:-zsh}"
+    print_success "Default shell: ${DEFAULT_SHELL}"
 }
 
 # =============================================================================
@@ -446,6 +450,24 @@ get_inputs_interactive() {
             TAILSCALE_WEBUI="no"
             print_success "Tailscale installation skipped"
         fi
+    fi
+
+    # --- Default Shell ---
+    if [[ -n "$DEFAULT_SHELL" ]]; then
+        print_success "Default shell: ${DEFAULT_SHELL} (from env)"
+    else
+        local shell_options=("zsh" "bash")
+        local shell_header="Select the default shell for root user."$'\n'
+        shell_header+="ZSH includes autosuggestions and syntax highlighting."
+
+        interactive_menu \
+            "Default Shell (↑/↓ select, Enter confirm)" \
+            "$shell_header" \
+            "ZSH|Modern shell with plugins (recommended)" \
+            "Bash|Default system shell"
+
+        DEFAULT_SHELL="${shell_options[$MENU_SELECTED]}"
+        print_success "Default shell: ${DEFAULT_SHELL}"
     fi
 }
 

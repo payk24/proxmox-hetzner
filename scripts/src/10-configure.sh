@@ -108,13 +108,25 @@ configure_proxmox_via_ssh() {
     # Install monitoring and system utilities
     remote_exec_with_progress "Installing system utilities" '
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat zsh zsh-autosuggestions zsh-syntax-highlighting 2>/dev/null || {
-            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat zsh zsh-autosuggestions zsh-syntax-highlighting; do
+        apt-get install -yqq btop iotop ncdu tmux pigz smartmontools jq bat 2>/dev/null || {
+            for pkg in btop iotop ncdu tmux pigz smartmontools jq bat; do
                 apt-get install -yqq "$pkg" 2>/dev/null || true
             done
         }
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     ' "System utilities installed"
+
+    # Install ZSH with plugins if selected
+    if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
+        remote_exec_with_progress "Installing ZSH with plugins" '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting 2>/dev/null || {
+                for pkg in zsh zsh-autosuggestions zsh-syntax-highlighting; do
+                    apt-get install -yqq "$pkg" 2>/dev/null || true
+                done
+            }
+        ' "ZSH with plugins installed"
+    fi
 
     # Configure UTF-8 locales (fix for btop and other apps)
     remote_exec_with_progress "Configuring UTF-8 locales" '
@@ -148,12 +160,16 @@ LANGUAGE=en_US.UTF-8
 ENVEOF
     ' "UTF-8 locales configured"
 
-    # Configure ZSH as default shell for root
-    (
-        remote_copy "template_files/zshrc" "/root/.zshrc"
-        remote_exec "chsh -s /bin/zsh root"
-    ) > /dev/null 2>&1 &
-    show_progress $! "Configuring ZSH" "ZSH configured"
+    # Configure default shell for root
+    if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
+        (
+            remote_copy "template_files/zshrc" "/root/.zshrc"
+            remote_exec "chsh -s /bin/zsh root"
+        ) > /dev/null 2>&1 &
+        show_progress $! "Configuring ZSH" "ZSH configured as default shell"
+    else
+        print_success "Bash configured as default shell"
+    fi
 
     # Configure NTP time synchronization with chrony
     remote_exec_with_progress "Installing NTP (chrony)" '
