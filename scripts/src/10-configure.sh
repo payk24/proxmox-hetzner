@@ -8,18 +8,16 @@ make_template_files() {
 
     # Download template files in background with progress
     (
-        download_file "./template_files/99-proxmox.conf" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
-        download_file "./template_files/hosts" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
-        download_file "./template_files/debian.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
-        download_file "./template_files/proxmox.sources" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
-        download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
-        download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
-        download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
-        download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
-        download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
-        download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
-        download_file "./template_files/pve-remove-nag" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag"
-        download_file "./template_files/99-pve-nag-removal" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-pve-nag-removal"
+        download_file "./template_files/99-proxmox.conf" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/99-proxmox.conf"
+        download_file "./template_files/hosts" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/hosts"
+        download_file "./template_files/debian.sources" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/debian.sources"
+        download_file "./template_files/proxmox.sources" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
+        download_file "./template_files/sshd_config" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
+        download_file "./template_files/zshrc" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+        download_file "./template_files/chrony" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
+        download_file "./template_files/50unattended-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
+        download_file "./template_files/20auto-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
+        download_file "./template_files/interfaces" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
     ) > /dev/null 2>&1 &
     show_progress $! "Downloading template files"
 

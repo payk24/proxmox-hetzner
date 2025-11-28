@@ -1,13 +1,13 @@
 # Proxmox on Hetzner Without Console Access
 
 <div align="center">
-  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/proxmox.png" alt="Proxmox" height="64" />
-  <img src="https://github.com/payk24/proxmox-hetzner/raw/main/icons/hetzner.png" alt="Hetzner" height="50" />
+  <img src="https://github.com/qoxi-cloud/proxmox-hetzner/raw/main/icons/proxmox.png" alt="Proxmox" height="64" />
+  <img src="https://github.com/qoxi-cloud/proxmox-hetzner/raw/main/icons/hetzner.png" alt="Hetzner" height="50" />
   <h3>Automated Installation for Hetzner Dedicated Servers</h3>
 
-  ![GitHub Stars](https://img.shields.io/github/stars/payk24/proxmox-hetzner.svg)
-  ![GitHub Watchers](https://img.shields.io/github/watchers/payk24/proxmox-hetzner.svg)
-  ![GitHub Forks](https://img.shields.io/github/forks/payk24/proxmox-hetzner.svg)
+  ![GitHub Stars](https://img.shields.io/github/stars/qoxi-cloud/proxmox-hetzner.svg)
+  ![GitHub Watchers](https://img.shields.io/github/watchers/qoxi-cloud/proxmox-hetzner.svg)
+  ![GitHub Forks](https://img.shields.io/github/forks/qoxi-cloud/proxmox-hetzner.svg)
 </div>
 
 ## 📑 Overview
@@ -42,8 +42,8 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
   <h3>❤️ Love This Tool? ❤️</h3>
   <p>If this project has saved you time and effort, please consider starring it!</p>
   <p>
-    <a href="https://github.com/payk24/proxmox-hetzner" target="_blank">
-      <img src="https://img.shields.io/github/stars/payk24/proxmox-hetzner?style=social" alt="Star on GitHub">
+    <a href="https://github.com/qoxi-cloud/proxmox-hetzner" target="_blank">
+      <img src="https://img.shields.io/github/stars/qoxi-cloud/proxmox-hetzner?style=social" alt="Star on GitHub">
     </a>
   </p>
   <p><b>Every star motivates me to create more awesome tools for the community!</b></p>
@@ -71,7 +71,7 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 Execute this single command in the rescue system terminal:
 
 ```bash
-bash <(curl -sSL https://github.com/payk24/proxmox-hetzner/raw/main/pve-install.sh)
+bash <(curl -sSL https://github.com/qoxi-cloud/proxmox-hetzner/raw/main/pve-install.sh)
 ```
 
 #### Command Line Options
@@ -106,10 +106,10 @@ You can pre-configure any setting via environment variables. In **interactive mo
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `PVE_HOSTNAME` | Server hostname | `pve` | No |
+| `PVE_HOSTNAME` | Server hostname | `pve-qoxi-cloud` | No |
 | `DOMAIN_SUFFIX` | Domain suffix for FQDN | `local` | No |
 | `TIMEZONE` | System timezone | `Europe/Kyiv` | No |
-| `EMAIL` | Admin email | `admin@example.com` | No |
+| `EMAIL` | Admin email | `admin@qoxi.cloud` | No |
 | `NEW_ROOT_PASSWORD` | Root password | - | **Yes** (non-interactive) |
 | `SSH_PUBLIC_KEY` | SSH public key | From rescue system | **Yes** (non-interactive) |
 | `INTERFACE_NAME` | Network interface | Auto-detected | No |
