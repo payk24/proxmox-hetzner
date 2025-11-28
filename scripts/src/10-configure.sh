@@ -19,6 +19,8 @@ make_template_files() {
         download_file "./template_files/50unattended-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
         download_file "./template_files/interfaces" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
+        download_file "./template_files/pve-remove-nag" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag"
+        download_file "./template_files/99-pve-nag-removal" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/99-pve-nag-removal"
     ) > /dev/null 2>&1 &
     show_progress $! "Downloading template files"
 
