@@ -300,8 +300,16 @@ ENVEOF
 
             # Disable OpenSSH when Tailscale SSH is enabled and authenticated
             if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-                remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
-                show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
+                remote_exec_with_progress "Disabling OpenSSH" '
+                    # Stop and disable SSH service
+                    systemctl stop ssh sshd 2>/dev/null || true
+                    systemctl disable ssh sshd 2>/dev/null || true
+                    # Also disable socket activation (important!)
+                    systemctl stop ssh.socket sshd.socket 2>/dev/null || true
+                    systemctl disable ssh.socket sshd.socket 2>/dev/null || true
+                    # Mask the services to prevent any reactivation
+                    systemctl mask ssh.service ssh.socket 2>/dev/null || true
+                ' "OpenSSH disabled (using Tailscale SSH only)"
             fi
 
             # Block all incoming connections to public IP (Tailscale-only access)
@@ -333,27 +341,28 @@ ENVEOF
         fi
     fi
 
-    # Deploy SSH hardening (skip if Tailscale SSH is active)
+    # Deploy SSH key and hardened config (always apply hardening for security)
+    (
+        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+    ) > /dev/null 2>&1 &
     if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
-        # Only deploy SSH key for emergency access, but keep SSH disabled
-        (
-            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
     else
-        (
-            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-            remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
-    # Power off the VM
+    # Sync filesystem and power off the VM
+    remote_exec "sync" > /dev/null 2>&1
     remote_exec "poweroff" > /dev/null 2>&1 &
     show_progress $! "Powering off the VM"
 
-    # Wait for QEMU to exit
-    wait_with_progress "Waiting for QEMU process to exit" 120 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"
+    # Wait for QEMU to exit (with fallback to force kill)
+    if ! wait_with_progress "Waiting for QEMU process to exit" 60 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"; then
+        # Force kill QEMU if graceful shutdown timed out
+        kill -9 $QEMU_PID 2>/dev/null || true
+        sleep 1
+        printf "${CLR_YELLOW}⚠ QEMU process was force-terminated${CLR_RESET}\n"
+    fi
 }
