@@ -42,8 +42,7 @@ install_proxmox() {
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
-    # QEMU returns non-zero exit code when VM powers off with -no-reboot, ignore it
-    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed" || true
+    show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed"
 }
 
 # Boot installed Proxmox with SSH port forwarding

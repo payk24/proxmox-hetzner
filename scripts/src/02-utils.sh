@@ -83,25 +83,18 @@ prompt_validated() {
 SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
 # Progress indicator with spinner
-# Returns the exit code of the background process (use || true if you don't care about failures)
 show_progress() {
     local pid=$1
     local message="${2:-Processing}"
     local done_message="${3:-$message}"
     local i=0
-    local exit_code=0
 
     while kill -0 "$pid" 2>/dev/null; do
         printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
         sleep 0.2
     done
 
-    # Collect exit code from background process
-    wait "$pid" 2>/dev/null
-    exit_code=$?
-
     printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
-    return $exit_code
 }
 
 # Wait for condition with progress
