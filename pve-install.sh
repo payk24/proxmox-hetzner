@@ -469,21 +469,32 @@ SSH_PORT="5555"
 
 # Wait for SSH to be fully ready (not just TCP port open)
 # This performs an actual SSH connection test, not just a TCP check
+# Shows spinner for user feedback
 wait_for_ssh_ready() {
-    local max_attempts="${1:-30}"
+    local max_attempts="${1:-60}"
+    local message="${2:-Connecting to VM via SSH}"
+    local done_message="${3:-SSH connection established}"
     local attempt=1
+    local i=0
 
     log "Waiting for SSH to be fully ready (max $max_attempts attempts)"
+
     while [[ $attempt -le $max_attempts ]]; do
+        # Show spinner
+        printf "\r${CLR_YELLOW}${SPINNER_CHARS:i++%${#SPINNER_CHARS}:1} %s${CLR_RESET}" "$message"
+
         if sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "exit 0" 2>/dev/null; then
+            printf "\r\e[K${CLR_GREEN}✓ %s${CLR_RESET}\n" "$done_message"
             log "SSH is fully ready after $attempt attempt(s)"
             return 0
         fi
+
         log "SSH not ready yet (attempt $attempt/$max_attempts)"
         sleep 2
         ((attempt++))
     done
 
+    printf "\r\e[K${CLR_RED}✗ SSH connection failed after $max_attempts attempts${CLR_RESET}\n"
     log "ERROR: SSH failed to become ready after $max_attempts attempts"
     return 1
 }
@@ -1871,9 +1882,13 @@ boot_proxmox_with_port_forwarding() {
     QEMU_PID=$!
     log "QEMU PID: $QEMU_PID"
 
-    # Wait for SSH with progress indicator (timeout 5 minutes)
+    # Wait for actual SSH connection (not just TCP port)
+    # Using 150 attempts (5 minutes) since VM boot takes time
     log "Waiting for SSH to become available on port 5555"
-    wait_with_progress "Booting installed Proxmox" 300 "(echo >/dev/tcp/localhost/5555)" 3 "Proxmox booted, SSH available"
+    wait_for_ssh_ready 150 "Booting Proxmox VM" "Proxmox booted, SSH available" || {
+        print_error "Failed to connect to VM via SSH. Check if VM is running properly."
+        exit 1
+    }
     log "SSH is available"
 }
 
@@ -1926,18 +1941,19 @@ make_template_files() {
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
     log "=== Starting configure_proxmox_via_ssh ==="
-    make_template_files
 
     log "Clearing SSH known hosts for localhost:5555"
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
-    # Wait for SSH to be fully ready (not just TCP port open)
-    # This ensures SSH can complete key exchange before we start copying files
-    wait_for_ssh_ready 30 || {
+    # Quick SSH verification (connection already established in boot phase)
+    # This ensures SSH is still available before we start configuring
+    wait_for_ssh_ready 30 "Verifying SSH connection" "SSH connection verified" || {
         print_error "SSH connection failed. Please check if the VM is running properly."
         exit 1
     }
-    print_success "SSH connection verified"
+
+    # Now download and prepare template files
+    make_template_files
 
     log "=== Copying template files ==="
     # Copy template files
