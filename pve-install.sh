@@ -1727,7 +1727,6 @@ make_template_files() {
         download_file "./template_files/sshd_config" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
         download_file "./template_files/zshrc" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
         download_file "./template_files/chrony" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
-        download_file "./template_files/motd-dynamic" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/motd-dynamic"
         download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
         download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
@@ -1877,15 +1876,6 @@ ENVEOF
     remote_copy "template_files/chrony" "/etc/chrony/chrony.conf"
     remote_exec "systemctl enable chrony && systemctl start chrony" > /dev/null 2>&1
 
-    # Configure dynamic MOTD
-    (
-        remote_exec "rm -f /etc/motd"
-        remote_exec "chmod -x /etc/update-motd.d/* 2>/dev/null || true"
-        remote_copy "template_files/motd-dynamic" "/etc/update-motd.d/10-proxmox-status"
-        remote_exec "chmod +x /etc/update-motd.d/10-proxmox-status"
-    ) > /dev/null 2>&1 &
-    show_progress $! "Configuring dynamic MOTD" "Dynamic MOTD configured"
-
     # Configure Unattended Upgrades (security updates, kernel excluded)
     remote_exec_with_progress "Installing Unattended Upgrades" '
         export DEBIAN_FRONTEND=noninteractive
@@ -1967,6 +1957,12 @@ ENVEOF
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" > /dev/null 2>&1 &
                 show_progress $! "Configuring Tailscale Serve" "Proxmox Web UI available via Tailscale Serve"
             fi
+
+            # Disable OpenSSH when Tailscale SSH is enabled and authenticated
+            if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+                remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
+                show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
+            fi
         else
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""
@@ -1974,16 +1970,26 @@ ENVEOF
             print_info "After reboot, run these commands to enable SSH and Web UI:"
             print_info "  tailscale up --ssh"
             print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
+            print_info "Then disable OpenSSH: systemctl disable --now ssh"
         fi
     fi
 
-    # Deploy SSH hardening LAST (after all other operations)
-    (
-        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-    ) > /dev/null 2>&1 &
-    show_progress $! "Deploying SSH hardening" "Security hardening configured"
+    # Deploy SSH hardening (skip if Tailscale SSH is active)
+    if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # Only deploy SSH key for emergency access, but keep SSH disabled
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        ) > /dev/null 2>&1 &
+        show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
+    else
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+            remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+        ) > /dev/null 2>&1 &
+        show_progress $! "Deploying SSH hardening" "Security hardening configured"
+    fi
 
     # Power off the VM
     remote_exec "poweroff" > /dev/null 2>&1 &
@@ -2023,7 +2029,6 @@ reboot_to_main_os() {
     summary+="[OK]|ZFS ARC limits|configured"$'\n'
     summary+="[OK]|nf_conntrack|optimized"$'\n'
     summary+="[OK]|NTP sync|chrony (Hetzner)"$'\n'
-    summary+="[OK]|Dynamic MOTD|enabled"$'\n'
     summary+="[OK]|Security updates|unattended"$'\n'
 
     # Tailscale status
@@ -2031,6 +2036,9 @@ reboot_to_main_os() {
         summary+="[OK]|Tailscale VPN|installed"$'\n'
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             summary+="[OK]|Tailscale IP|${TAILSCALE_IP:-pending}"$'\n'
+            if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+                summary+="[OK]|OpenSSH|DISABLED (Tailscale only)"$'\n'
+            fi
         else
             summary+="[WARN]|Tailscale|needs auth after reboot"$'\n'
         fi
@@ -2038,14 +2046,26 @@ reboot_to_main_os() {
 
     summary+="|--- Access ---|"$'\n'
     summary+="[OK]|Web UI|https://${MAIN_IPV4_CIDR%/*}:8006"$'\n'
-    summary+="[OK]|SSH|root@${MAIN_IPV4_CIDR%/*}"
 
-    if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        summary+=$'\n'"[OK]|Tailscale SSH|root@${TAILSCALE_IP}"
-        if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+    # Show SSH access based on configuration
+    if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # OpenSSH disabled, only Tailscale SSH available
+        if [[ "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
+            summary+="[OK]|SSH|root@${TAILSCALE_IP} (Tailscale)"
+            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+                summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+            fi
         else
-            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_IP}:8006"
+            summary+="[WARN]|SSH|Tailscale pending"
+        fi
+    else
+        # Regular SSH available
+        summary+="[OK]|SSH|root@${MAIN_IPV4_CIDR%/*}"
+        if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
+            summary+=$'\n'"[OK]|Tailscale SSH|root@${TAILSCALE_IP}"
+            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+                summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+            fi
         fi
     fi
 
