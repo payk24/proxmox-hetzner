@@ -331,10 +331,16 @@ ENVEOF
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
-    # Power off the VM
+    # Sync filesystem and power off the VM
+    remote_exec "sync" > /dev/null 2>&1
     remote_exec "poweroff" > /dev/null 2>&1 &
     show_progress $! "Powering off the VM"
 
-    # Wait for QEMU to exit
-    wait_with_progress "Waiting for QEMU process to exit" 120 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"
+    # Wait for QEMU to exit (with fallback to force kill)
+    if ! wait_with_progress "Waiting for QEMU process to exit" 60 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"; then
+        # Force kill QEMU if graceful shutdown timed out
+        kill -9 $QEMU_PID 2>/dev/null || true
+        sleep 1
+        printf "${CLR_YELLOW}⚠ QEMU process was force-terminated${CLR_RESET}\n"
+    fi
 }
