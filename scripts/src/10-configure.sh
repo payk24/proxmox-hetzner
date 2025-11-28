@@ -212,13 +212,29 @@ ENVEOF
         fi
     ' "CPU governor configured"
 
-    # Remove Proxmox subscription notice
-    remote_exec_with_progress "Removing Proxmox subscription notice" '
-        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-            systemctl restart pveproxy.service
-        fi
-    ' "Subscription notice removed"
+    # Remove Proxmox subscription notice (Web + Mobile UI) with persistent DPkg hook
+    (
+        remote_exec "mkdir -p /usr/local/bin"
+        remote_copy "template_files/pve-remove-nag" "/usr/local/bin/pve-remove-nag"
+        remote_copy "template_files/99-pve-nag-removal" "/etc/apt/apt.conf.d/99-pve-nag-removal"
+        remote_exec "chmod 755 /usr/local/bin/pve-remove-nag"
+        remote_exec "/usr/local/bin/pve-remove-nag"
+        remote_exec "systemctl restart pveproxy.service 2>/dev/null || true"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Removing subscription notice" "Subscription notice removed (persistent)"
+
+    # Disable HA services for single-node mode (saves ~100-200MB RAM)
+    if [[ "$CLUSTER_MODE" == "single" ]]; then
+        remote_exec_with_progress "Disabling HA services (single-node mode)" '
+            # Disable High Availability services
+            systemctl disable --now pve-ha-lrm 2>/dev/null || true
+            systemctl disable --now pve-ha-crm 2>/dev/null || true
+            systemctl disable --now corosync 2>/dev/null || true
+
+            # Mask services to prevent accidental starts
+            systemctl mask pve-ha-lrm pve-ha-crm corosync 2>/dev/null || true
+        ' "HA services disabled (single-node)"
+    fi
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then

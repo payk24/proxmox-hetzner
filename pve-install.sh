@@ -153,6 +153,9 @@ TAILSCALE_WEBUI="${TAILSCALE_WEBUI}"
 
 # ZFS RAID mode (single, raid0, raid1)
 ZFS_RAID="${ZFS_RAID}"
+
+# Cluster mode (single, cluster)
+CLUSTER_MODE="${CLUSTER_MODE}"
 EOF
     chmod 600 "$file"
     echo -e "${CLR_GREEN}✓ Configuration saved to: $file${CLR_RESET}"
@@ -1154,6 +1157,10 @@ get_inputs_non_interactive() {
     parse_ssh_key "$SSH_PUBLIC_KEY"
     print_success "SSH key configured (${SSH_KEY_TYPE})"
 
+    # Cluster mode
+    CLUSTER_MODE="${CLUSTER_MODE:-single}"
+    print_success "Cluster mode: ${CLUSTER_MODE}"
+
     # Tailscale
     INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -1403,6 +1410,26 @@ get_inputs_interactive() {
             SSH_PUBLIC_KEY="$INPUT_VALUE"
             parse_ssh_key "$SSH_PUBLIC_KEY"
             print_success "SSH key configured (${SSH_KEY_TYPE})"
+        fi
+    fi
+
+    # --- Cluster Mode ---
+    if [[ -n "$CLUSTER_MODE" ]]; then
+        print_success "Cluster mode: ${CLUSTER_MODE} (from env)"
+    else
+        local cluster_options=("single" "cluster")
+
+        interactive_menu \
+            "Cluster Mode (↑/↓ select, Enter confirm)" \
+            "Single-node disables HA services to save ~100-200MB RAM" \
+            "Single node|Standalone server, HA services disabled" \
+            "Multi-node cluster|Keep HA services for cluster setup"
+
+        CLUSTER_MODE="${cluster_options[$MENU_SELECTED]}"
+        if [[ "$CLUSTER_MODE" == "single" ]]; then
+            print_success "Cluster mode: Single node (HA disabled)"
+        else
+            print_success "Cluster mode: Multi-node cluster"
         fi
     fi
 
@@ -1752,6 +1779,8 @@ make_template_files() {
         download_file "./template_files/50unattended-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
         download_file "./template_files/interfaces" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
+        download_file "./template_files/pve-remove-nag" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag"
+        download_file "./template_files/99-pve-nag-removal" "https://github.com/payk24/proxmox-hetzner/raw/refs/heads/main/template_files/99-pve-nag-removal"
     ) > /dev/null 2>&1 &
     show_progress $! "Downloading template files"
 
@@ -1946,13 +1975,29 @@ ENVEOF
         fi
     ' "CPU governor configured"
 
-    # Remove Proxmox subscription notice
-    remote_exec_with_progress "Removing Proxmox subscription notice" '
-        if [ -f /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then
-            sed -Ezi.bak "s/(Ext.Msg.show\(\{\s+title: gettext\('"'"'No valid sub)/void\(\{ \/\/\1/g" /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-            systemctl restart pveproxy.service
-        fi
-    ' "Subscription notice removed"
+    # Remove Proxmox subscription notice (Web + Mobile UI) with persistent DPkg hook
+    (
+        remote_exec "mkdir -p /usr/local/bin"
+        remote_copy "template_files/pve-remove-nag" "/usr/local/bin/pve-remove-nag"
+        remote_copy "template_files/99-pve-nag-removal" "/etc/apt/apt.conf.d/99-pve-nag-removal"
+        remote_exec "chmod 755 /usr/local/bin/pve-remove-nag"
+        remote_exec "/usr/local/bin/pve-remove-nag"
+        remote_exec "systemctl restart pveproxy.service 2>/dev/null || true"
+    ) > /dev/null 2>&1 &
+    show_progress $! "Removing subscription notice" "Subscription notice removed (persistent)"
+
+    # Disable HA services for single-node mode (saves ~100-200MB RAM)
+    if [[ "$CLUSTER_MODE" == "single" ]]; then
+        remote_exec_with_progress "Disabling HA services (single-node mode)" '
+            # Disable High Availability services
+            systemctl disable --now pve-ha-lrm 2>/dev/null || true
+            systemctl disable --now pve-ha-crm 2>/dev/null || true
+            systemctl disable --now corosync 2>/dev/null || true
+
+            # Mask services to prevent accidental starts
+            systemctl mask pve-ha-lrm pve-ha-crm corosync 2>/dev/null || true
+        ' "HA services disabled (single-node)"
+    fi
 
     # Install Tailscale if requested
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
