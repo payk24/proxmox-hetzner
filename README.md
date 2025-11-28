@@ -23,7 +23,6 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 - **Automatic security updates**: Unattended upgrades (kernel excluded)
 - **NTP time sync**: Chrony with Hetzner NTP servers
 - **ZSH shell**: Pre-configured with autosuggestions and syntax highlighting
-- **Dynamic MOTD**: System status on every login
 - Clean progress indicators with spinners for all operations
 - Full logging to file for troubleshooting
 - Pre-flight hardware and connectivity checks
@@ -206,7 +205,6 @@ The installation script automatically applies the following optimizations:
 | CPU governor | Set to `performance` mode |
 | NTP sync | Chrony with Hetzner NTP servers |
 | UTF-8 locales | Properly configured for all apps |
-| Dynamic MOTD | System status shown on SSH login |
 | Subscription notice | Removed from web UI |
 | Enterprise repos | Disabled (no subscription required) |
 

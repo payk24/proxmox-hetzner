@@ -27,7 +27,6 @@ reboot_to_main_os() {
     summary+="[OK]|ZFS ARC limits|configured"$'\n'
     summary+="[OK]|nf_conntrack|optimized"$'\n'
     summary+="[OK]|NTP sync|chrony (Hetzner)"$'\n'
-    summary+="[OK]|Dynamic MOTD|enabled"$'\n'
     summary+="[OK]|Security updates|unattended"$'\n'
 
     # Tailscale status
@@ -35,6 +34,9 @@ reboot_to_main_os() {
         summary+="[OK]|Tailscale VPN|installed"$'\n'
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             summary+="[OK]|Tailscale IP|${TAILSCALE_IP:-pending}"$'\n'
+            if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+                summary+="[OK]|OpenSSH|DISABLED (Tailscale only)"$'\n'
+            fi
         else
             summary+="[WARN]|Tailscale|needs auth after reboot"$'\n'
         fi
@@ -42,14 +44,26 @@ reboot_to_main_os() {
 
     summary+="|--- Access ---|"$'\n'
     summary+="[OK]|Web UI|https://${MAIN_IPV4_CIDR%/*}:8006"$'\n'
-    summary+="[OK]|SSH|root@${MAIN_IPV4_CIDR%/*}"
 
-    if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
-        summary+=$'\n'"[OK]|Tailscale SSH|root@${TAILSCALE_IP}"
-        if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
-            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+    # Show SSH access based on configuration
+    if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # OpenSSH disabled, only Tailscale SSH available
+        if [[ "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
+            summary+="[OK]|SSH|root@${TAILSCALE_IP} (Tailscale)"
+            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+                summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+            fi
         else
-            summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_IP}:8006"
+            summary+="[WARN]|SSH|Tailscale pending"
+        fi
+    else
+        # Regular SSH available
+        summary+="[OK]|SSH|root@${MAIN_IPV4_CIDR%/*}"
+        if [[ "$INSTALL_TAILSCALE" == "yes" && -n "$TAILSCALE_AUTH_KEY" && "$TAILSCALE_IP" != "pending" && "$TAILSCALE_IP" != "not authenticated" ]]; then
+            summary+=$'\n'"[OK]|Tailscale SSH|root@${TAILSCALE_IP}"
+            if [[ -n "$TAILSCALE_HOSTNAME" ]]; then
+                summary+=$'\n'"[OK]|Tailscale Web|https://${TAILSCALE_HOSTNAME}"
+            fi
         fi
     fi
 
