@@ -2148,13 +2148,13 @@ ENVEOF
             fi
 
             # Disable OpenSSH when Tailscale SSH is enabled and authenticated
+            # Note: We only disable/mask, NOT stop - stopping would break our SSH connection
+            # SSH won't start after reboot because it's masked
             if [[ "$TAILSCALE_SSH" == "yes" ]]; then
                 remote_exec_with_progress "Disabling OpenSSH" '
-                    # Stop and disable SSH service
-                    systemctl stop ssh sshd 2>/dev/null || true
+                    # Disable SSH service (will not start on next boot)
                     systemctl disable ssh sshd 2>/dev/null || true
-                    # Also disable socket activation (important!)
-                    systemctl stop ssh.socket sshd.socket 2>/dev/null || true
+                    # Disable socket activation
                     systemctl disable ssh.socket sshd.socket 2>/dev/null || true
                     # Mask the services to prevent any reactivation
                     systemctl mask ssh.service ssh.socket 2>/dev/null || true
@@ -2202,9 +2202,8 @@ ENVEOF
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
-    # Sync filesystem and power off the VM (ignore exit code - SSH connection closes when VM shuts down)
-    remote_exec "sync" > /dev/null 2>&1
-    remote_exec "poweroff" > /dev/null 2>&1 &
+    # Sync filesystem and power off the VM (ignore exit codes - SSH connection drops during shutdown)
+    (remote_exec "sync && poweroff" || true) > /dev/null 2>&1 &
     show_progress $! "Powering off the VM"
 
     # Wait for QEMU to exit (with fallback to force kill)
