@@ -1775,6 +1775,7 @@ make_template_files() {
         download_file "./template_files/proxmox.sources" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
         download_file "./template_files/sshd_config" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
         download_file "./template_files/zshrc" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
+        download_file "./template_files/p10k.zsh" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/p10k.zsh"
         download_file "./template_files/chrony" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
         download_file "./template_files/50unattended-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
@@ -1877,16 +1878,34 @@ configure_proxmox_via_ssh() {
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     ' "System utilities installed"
 
-    # Install ZSH with plugins if selected
+    # Install ZSH with Oh-My-Zsh and Powerlevel10k if selected
     if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
-        remote_exec_with_progress "Installing ZSH with plugins" '
+        remote_exec_with_progress "Installing ZSH and Git" '
             export DEBIAN_FRONTEND=noninteractive
-            apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting 2>/dev/null || {
-                for pkg in zsh zsh-autosuggestions zsh-syntax-highlighting; do
+            apt-get install -yqq zsh git curl 2>/dev/null || {
+                for pkg in zsh git curl; do
                     apt-get install -yqq "$pkg" 2>/dev/null || true
                 done
             }
-        ' "ZSH with plugins installed"
+        ' "ZSH and Git installed"
+
+        remote_exec_with_progress "Installing Oh-My-Zsh" '
+            export DEBIAN_FRONTEND=noninteractive
+            # Install Oh-My-Zsh unattended
+            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+        ' "Oh-My-Zsh installed"
+
+        remote_exec_with_progress "Installing Powerlevel10k theme" '
+            # Clone Powerlevel10k theme
+            git clone --depth=1 https://github.com/romkatv/powerlevel10k.git /root/.oh-my-zsh/custom/themes/powerlevel10k 2>/dev/null || true
+        ' "Powerlevel10k theme installed"
+
+        remote_exec_with_progress "Installing ZSH plugins" '
+            # Clone zsh-autosuggestions plugin
+            git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions /root/.oh-my-zsh/custom/plugins/zsh-autosuggestions 2>/dev/null || true
+            # Clone zsh-syntax-highlighting plugin
+            git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting /root/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting 2>/dev/null || true
+        ' "ZSH plugins installed"
     fi
 
     # Configure UTF-8 locales (fix for btop and other apps)
@@ -1925,9 +1944,10 @@ ENVEOF
     if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
         (
             remote_copy "template_files/zshrc" "/root/.zshrc"
+            remote_copy "template_files/p10k.zsh" "/root/.p10k.zsh"
             remote_exec "chsh -s /bin/zsh root"
         ) > /dev/null 2>&1 &
-        show_progress $! "Configuring ZSH" "ZSH configured as default shell"
+        show_progress $! "Configuring ZSH with Powerlevel10k" "ZSH + Powerlevel10k configured"
     else
         print_success "Bash configured as default shell"
     fi
