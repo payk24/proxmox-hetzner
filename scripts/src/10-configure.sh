@@ -353,10 +353,10 @@ ENVEOF
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
-    # Sync filesystem and power off the VM
+    # Sync filesystem and power off the VM (ignore exit code - SSH connection closes when VM shuts down)
     remote_exec "sync" > /dev/null 2>&1
     remote_exec "poweroff" > /dev/null 2>&1 &
-    show_progress $! "Powering off the VM"
+    show_progress $! "Powering off the VM" || true
 
     # Wait for QEMU to exit (with fallback to force kill)
     if ! wait_with_progress "Waiting for QEMU process to exit" 60 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"; then
