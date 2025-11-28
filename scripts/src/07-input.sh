@@ -153,6 +153,7 @@ get_inputs_non_interactive() {
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
         TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
         TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+        TAILSCALE_BLOCK_PUBLIC_IP="${TAILSCALE_BLOCK_PUBLIC_IP:-no}"
         if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
             print_success "Tailscale will be installed (auto-connect)"
         else
@@ -160,6 +161,7 @@ get_inputs_non_interactive() {
         fi
         print_success "Tailscale SSH: ${TAILSCALE_SSH}"
         print_success "Tailscale WebUI: ${TAILSCALE_WEBUI}"
+        print_success "Block public IP: ${TAILSCALE_BLOCK_PUBLIC_IP}"
     else
         print_success "Tailscale: skipped"
     fi
@@ -425,6 +427,7 @@ get_inputs_interactive() {
         if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
             TAILSCALE_SSH="${TAILSCALE_SSH:-yes}"
             TAILSCALE_WEBUI="${TAILSCALE_WEBUI:-yes}"
+            TAILSCALE_BLOCK_PUBLIC_IP="${TAILSCALE_BLOCK_PUBLIC_IP:-no}"
             if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
                 print_success "Tailscale: yes (auto-connect, from env)"
             else
@@ -434,6 +437,7 @@ get_inputs_interactive() {
             TAILSCALE_AUTH_KEY=""
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
+            TAILSCALE_BLOCK_PUBLIC_IP="no"
             print_success "Tailscale: skipped (from env)"
         fi
     else
@@ -464,7 +468,27 @@ get_inputs_interactive() {
 
             if [[ -n "$TAILSCALE_AUTH_KEY" ]]; then
                 print_success "Tailscale will be installed (auto-connect)"
+
+                # Ask about blocking public IP connections
+                local block_header="Block all incoming connections to public IP?"$'\n'
+                block_header+="This forces access ONLY through Tailscale tunnel."$'\n'
+                block_header+="WARNING: You will lose SSH access via public IP!"
+
+                interactive_menu \
+                    "Block Public IP Access (↑/↓ select, Enter confirm)" \
+                    "$block_header" \
+                    "Yes, block public IP|Allow connections only via Tailscale" \
+                    "No, keep public IP accessible|Standard access via both"
+
+                if [[ $MENU_SELECTED -eq 0 ]]; then
+                    TAILSCALE_BLOCK_PUBLIC_IP="yes"
+                    print_success "Public IP will be blocked (Tailscale-only access)"
+                else
+                    TAILSCALE_BLOCK_PUBLIC_IP="no"
+                    print_success "Public IP remains accessible"
+                fi
             else
+                TAILSCALE_BLOCK_PUBLIC_IP="no"
                 print_success "Tailscale will be installed (manual auth required)"
             fi
         else
@@ -472,6 +496,7 @@ get_inputs_interactive() {
             TAILSCALE_AUTH_KEY=""
             TAILSCALE_SSH="no"
             TAILSCALE_WEBUI="no"
+            TAILSCALE_BLOCK_PUBLIC_IP="no"
             print_success "Tailscale installation skipped"
         fi
     fi

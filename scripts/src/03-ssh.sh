@@ -6,6 +6,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 SSH_PORT="5555"
 
 remote_exec() {
+    log "remote_exec: $*"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "$@"
 }
 
@@ -19,16 +20,22 @@ remote_exec_with_progress() {
     local script="$2"
     local done_message="${3:-$message}"
 
+    log "remote_exec_with_progress: $message"
     echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
     local pid=$!
     show_progress $pid "$message" "$done_message"
     wait $pid
-    return $?
+    local exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        log "remote_exec_with_progress FAILED: $message (exit code: $exit_code)"
+    fi
+    return $exit_code
 }
 
 remote_copy() {
     local src="$1"
     local dst="$2"
+    log "remote_copy: $src -> $dst"
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst"
 }
 
