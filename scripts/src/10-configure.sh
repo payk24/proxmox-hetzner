@@ -3,8 +3,10 @@
 # =============================================================================
 
 make_template_files() {
+    log "=== Starting make_template_files ==="
     mkdir -p ./template_files
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
+    log "Using interfaces template: $interfaces_template"
 
     # Download template files in background with progress
     (
@@ -43,9 +45,13 @@ make_template_files() {
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
+    log "=== Starting configure_proxmox_via_ssh ==="
     make_template_files
+
+    log "Clearing SSH known hosts for localhost:5555"
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
+    log "=== Copying template files ==="
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
     remote_copy "template_files/interfaces" "/etc/network/interfaces"
@@ -53,11 +59,12 @@ configure_proxmox_via_ssh() {
     remote_copy "template_files/debian.sources" "/etc/apt/sources.list.d/debian.sources"
     remote_copy "template_files/proxmox.sources" "/etc/apt/sources.list.d/proxmox.sources"
 
+    log "=== Basic system configuration ==="
     # Basic system configuration
-    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
+    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak" || true
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
     remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null" || true
 
     # Configure ZFS ARC memory limits
     remote_exec_with_progress "Configuring ZFS ARC memory limits" '

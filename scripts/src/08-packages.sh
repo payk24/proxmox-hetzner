@@ -3,9 +3,12 @@
 # =============================================================================
 
 prepare_packages() {
+    log "=== Starting prepare_packages ==="
+    log "Adding Proxmox repository"
     echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve.list
 
     # Download Proxmox GPG key
+    log "Downloading Proxmox GPG key"
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
     show_progress $! "Downloading Proxmox GPG key" "Proxmox GPG key downloaded"
     wait $!
@@ -15,6 +18,7 @@ prepare_packages() {
     fi
 
     # Update package lists
+    log "Updating package lists"
     apt clean > /dev/null 2>&1
     apt update > /dev/null 2>&1 &
     show_progress $! "Updating package lists" "Package lists updated"
@@ -25,6 +29,7 @@ prepare_packages() {
     fi
 
     # Install packages
+    log "Installing required packages"
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
     show_progress $! "Installing required packages" "Required packages installed"
     wait $!
@@ -48,11 +53,14 @@ get_latest_proxmox_ve_iso() {
 }
 
 download_proxmox_iso() {
+    log "=== Starting download_proxmox_iso ==="
     if [[ -f "pve.iso" ]]; then
+        log "Proxmox ISO already exists"
         print_success "Proxmox ISO already exists, skipping download"
         return 0
     fi
 
+    log "Fetching latest Proxmox ISO URL"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         print_error "Failed to retrieve Proxmox ISO URL! Exiting."
@@ -106,6 +114,8 @@ download_proxmox_iso() {
 }
 
 make_answer_toml() {
+    log "=== Creating answer.toml ==="
+    log "ZFS_RAID=$ZFS_RAID, FQDN=$FQDN, EMAIL=$EMAIL"
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
         single)
@@ -142,9 +152,11 @@ EOF
 }
 
 make_autoinstall_iso() {
+    log "=== Creating autoinstall ISO ==="
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso > /dev/null 2>&1 &
     show_progress $! "Creating autoinstall ISO" "Autoinstall ISO created"
 
     # Remove original ISO to save disk space (only autoinstall ISO is needed)
+    log "Removing original ISO to save space"
     rm -f pve.iso
 }
