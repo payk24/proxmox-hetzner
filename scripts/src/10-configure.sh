@@ -316,20 +316,6 @@ ENVEOF
                 show_progress $! "Configuring Tailscale Serve" "Proxmox Web UI available via Tailscale Serve"
             fi
 
-            # Disable OpenSSH when Tailscale SSH is enabled and authenticated
-            # Note: We only disable/mask, NOT stop - stopping would break our SSH connection
-            # SSH won't start after reboot because it's masked
-            if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-                remote_exec_with_progress "Disabling OpenSSH" '
-                    # Disable SSH service (will not start on next boot)
-                    systemctl disable ssh sshd 2>/dev/null || true
-                    # Disable socket activation
-                    systemctl disable ssh.socket sshd.socket 2>/dev/null || true
-                    # Mask the services to prevent any reactivation
-                    systemctl mask ssh.service ssh.socket 2>/dev/null || true
-                ' "OpenSSH disabled (using Tailscale SSH only)"
-            fi
-
             # Block all incoming connections to public IP (Tailscale-only access)
             if [[ "$TAILSCALE_BLOCK_PUBLIC_IP" == "yes" ]]; then
                 (
@@ -355,21 +341,16 @@ ENVEOF
             print_info "After reboot, run these commands to enable SSH and Web UI:"
             print_info "  tailscale up --ssh"
             print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
-            print_info "Then disable OpenSSH: systemctl disable --now ssh"
         fi
     fi
 
-    # Deploy SSH key and hardened config (always apply hardening for security)
+    # Deploy SSH key and hardened config
     (
         remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
         remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
         remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
     ) > /dev/null 2>&1 &
-    if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
-        show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
-    else
-        show_progress $! "Deploying SSH hardening" "Security hardening configured"
-    fi
+    show_progress $! "Deploying SSH hardening" "Security hardening configured"
 
     # Sync filesystem and power off the VM (ignore exit codes - SSH connection drops during shutdown)
     (remote_exec "sync && poweroff" || true) > /dev/null 2>&1 &
