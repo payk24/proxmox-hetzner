@@ -46,18 +46,19 @@ make_template_files() {
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
     log "=== Starting configure_proxmox_via_ssh ==="
-    make_template_files
 
     log "Clearing SSH known hosts for localhost:5555"
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
-    # Wait for SSH to be fully ready (not just TCP port open)
-    # This ensures SSH can complete key exchange before we start copying files
-    wait_for_ssh_ready 30 || {
+    # Quick SSH verification (connection already established in boot phase)
+    # This ensures SSH is still available before we start configuring
+    wait_for_ssh_ready 30 "Verifying SSH connection" "SSH connection verified" || {
         print_error "SSH connection failed. Please check if the VM is running properly."
         exit 1
     }
-    print_success "SSH connection verified"
+
+    # Now download and prepare template files
+    make_template_files
 
     log "=== Copying template files ==="
     # Copy template files

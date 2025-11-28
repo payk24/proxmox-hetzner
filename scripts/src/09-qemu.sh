@@ -70,8 +70,12 @@ boot_proxmox_with_port_forwarding() {
     QEMU_PID=$!
     log "QEMU PID: $QEMU_PID"
 
-    # Wait for SSH with progress indicator (timeout 5 minutes)
+    # Wait for actual SSH connection (not just TCP port)
+    # Using 150 attempts (5 minutes) since VM boot takes time
     log "Waiting for SSH to become available on port 5555"
-    wait_with_progress "Booting installed Proxmox" 300 "(echo >/dev/tcp/localhost/5555)" 3 "Proxmox booted, SSH available"
+    wait_for_ssh_ready 150 "Booting Proxmox VM" "Proxmox booted, SSH available" || {
+        print_error "Failed to connect to VM via SSH. Check if VM is running properly."
+        exit 1
+    }
     log "SSH is available"
 }
