@@ -19,10 +19,10 @@ This project provides an automated solution for installing Proxmox VE on Hetzner
 - **Interactive menus** for easy configuration (arrow keys navigation)
 - **Network bridge modes**: Internal NAT, External bridged, or both
 - **ZFS RAID selection**: RAID-1 (mirror), RAID-0 (stripe), or single drive
+- **Shell selection**: ZSH (with plugins) or Bash - your choice
 - **SSH hardening**: Key-only auth, modern ciphers, secure defaults
 - **Automatic security updates**: Unattended upgrades (kernel excluded)
 - **NTP time sync**: Chrony with Hetzner NTP servers
-- **ZSH shell**: Pre-configured with autosuggestions and syntax highlighting
 - Clean progress indicators with spinners for all operations
 - Full logging to file for troubleshooting
 - Pre-flight hardware and connectivity checks
@@ -116,6 +116,7 @@ You can pre-configure any setting via environment variables. In **interactive mo
 | `BRIDGE_MODE` | Network mode: `internal`, `external`, `both` | `internal` | No |
 | `PRIVATE_SUBNET` | NAT subnet (CIDR) | `10.0.0.0/24` | No |
 | `ZFS_RAID` | ZFS mode: `single`, `raid0`, `raid1` | `raid1` (2+ disks) | No |
+| `DEFAULT_SHELL` | Default shell: `zsh`, `bash` | `zsh` | No |
 | `INSTALL_TAILSCALE` | Install Tailscale: `yes`, `no` | `no` | No |
 | `TAILSCALE_AUTH_KEY` | Tailscale auth key | - | No |
 | `TAILSCALE_SSH` | Enable Tailscale SSH | `yes` | No |
@@ -173,7 +174,7 @@ The installation script automatically applies the following optimizations:
 **Installed Packages:**
 | Package | Purpose |
 |---------|---------|
-| `zsh` | Modern shell with plugins (autosuggestions, syntax highlighting) |
+| `zsh` | Modern shell with plugins (optional, selected by default) |
 | `btop` | Modern system monitor (CPU, RAM, disk, network) |
 | `iotop` | Disk I/O monitoring |
 | `ncdu` | Interactive disk usage analyzer |
