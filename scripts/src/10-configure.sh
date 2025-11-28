@@ -51,6 +51,14 @@ configure_proxmox_via_ssh() {
     log "Clearing SSH known hosts for localhost:5555"
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
+    # Wait for SSH to be fully ready (not just TCP port open)
+    # This ensures SSH can complete key exchange before we start copying files
+    wait_for_ssh_ready 30 || {
+        print_error "SSH connection failed. Please check if the VM is running properly."
+        exit 1
+    }
+    print_success "SSH connection verified"
+
     log "=== Copying template files ==="
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"

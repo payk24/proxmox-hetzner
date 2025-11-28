@@ -2,8 +2,29 @@
 # SSH helper functions
 # =============================================================================
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 SSH_PORT="5555"
+
+# Wait for SSH to be fully ready (not just TCP port open)
+# This performs an actual SSH connection test, not just a TCP check
+wait_for_ssh_ready() {
+    local max_attempts="${1:-30}"
+    local attempt=1
+
+    log "Waiting for SSH to be fully ready (max $max_attempts attempts)"
+    while [[ $attempt -le $max_attempts ]]; do
+        if sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "exit 0" 2>/dev/null; then
+            log "SSH is fully ready after $attempt attempt(s)"
+            return 0
+        fi
+        log "SSH not ready yet (attempt $attempt/$max_attempts)"
+        sleep 2
+        ((attempt++))
+    done
+
+    log "ERROR: SSH failed to become ready after $max_attempts attempts"
+    return 1
+}
 
 remote_exec() {
     log "remote_exec: $*"
@@ -35,8 +56,27 @@ remote_exec_with_progress() {
 remote_copy() {
     local src="$1"
     local dst="$2"
+    local max_retries=3
+    local attempt=1
+    local delay=2
+
     log "remote_copy: $src -> $dst"
-    sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst"
+
+    while [[ $attempt -le $max_retries ]]; do
+        if sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst" 2>/dev/null; then
+            return 0
+        fi
+
+        if [[ $attempt -lt $max_retries ]]; then
+            log "remote_copy failed (attempt $attempt/$max_retries), retrying in ${delay}s..."
+            sleep $delay
+            delay=$((delay * 2))
+        fi
+        ((attempt++))
+    done
+
+    log "ERROR: remote_copy failed after $max_retries attempts: $src -> $dst"
+    return 1
 }
 
 # =============================================================================
