@@ -22,6 +22,7 @@ bash pve-install.sh
 | `TAILSCALE_AUTH_KEY` | Auth key for automatic setup | - |
 | `TAILSCALE_SSH` | Enable Tailscale SSH | `yes` |
 | `TAILSCALE_WEBUI` | Enable Tailscale Web UI proxy | `yes` |
+| `TAILSCALE_BLOCK_PUBLIC_IP` | Block all connections to public IP | `no` |
 
 ## Access Methods
 
@@ -65,12 +66,32 @@ tailscale serve --bg --https=443 https://127.0.0.1:8006
    - Tags: Optional
 4. Copy the key (starts with `tskey-auth-`)
 
+## Block Public IP Access
+
+When `TAILSCALE_BLOCK_PUBLIC_IP=yes` is set, the server becomes completely invisible on its public IP:
+
+- All incoming connections to public IP are blocked (including ICMP ping)
+- Only established/related connections are allowed (for outbound traffic)
+- Access is possible **only** through Tailscale tunnel
+
+This provides maximum security by hiding the server from the public internet.
+
+```bash
+export INSTALL_TAILSCALE="yes"
+export TAILSCALE_AUTH_KEY="tskey-auth-xxxxx"
+export TAILSCALE_BLOCK_PUBLIC_IP="yes"
+bash pve-install.sh
+```
+
+> **Warning:** With this option enabled, you will lose all access via public IP. Make sure Tailscale is properly configured before enabling.
+
 ## Security Notes
 
 - Tailscale SSH bypasses the server's SSH daemon
 - Access is controlled via Tailscale ACLs
 - Web UI access requires Tailscale connection
 - No ports need to be exposed to the public internet
+- With `TAILSCALE_BLOCK_PUBLIC_IP=yes`, server is invisible on public IP
 
 ## Troubleshooting
 
