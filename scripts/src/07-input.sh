@@ -144,6 +144,10 @@ get_inputs_non_interactive() {
     parse_ssh_key "$SSH_PUBLIC_KEY"
     print_success "SSH key configured (${SSH_KEY_TYPE})"
 
+    # Cluster mode
+    CLUSTER_MODE="${CLUSTER_MODE:-single}"
+    print_success "Cluster mode: ${CLUSTER_MODE}"
+
     # Tailscale
     INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-no}"
     if [[ "$INSTALL_TAILSCALE" == "yes" ]]; then
@@ -393,6 +397,26 @@ get_inputs_interactive() {
             SSH_PUBLIC_KEY="$INPUT_VALUE"
             parse_ssh_key "$SSH_PUBLIC_KEY"
             print_success "SSH key configured (${SSH_KEY_TYPE})"
+        fi
+    fi
+
+    # --- Cluster Mode ---
+    if [[ -n "$CLUSTER_MODE" ]]; then
+        print_success "Cluster mode: ${CLUSTER_MODE} (from env)"
+    else
+        local cluster_options=("single" "cluster")
+
+        interactive_menu \
+            "Cluster Mode (↑/↓ select, Enter confirm)" \
+            "Single-node disables HA services to save ~100-200MB RAM" \
+            "Single node|Standalone server, HA services disabled" \
+            "Multi-node cluster|Keep HA services for cluster setup"
+
+        CLUSTER_MODE="${cluster_options[$MENU_SELECTED]}"
+        if [[ "$CLUSTER_MODE" == "single" ]]; then
+            print_success "Cluster mode: Single node (HA disabled)"
+        else
+            print_success "Cluster mode: Multi-node cluster"
         fi
     fi
 
