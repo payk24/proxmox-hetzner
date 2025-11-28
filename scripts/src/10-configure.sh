@@ -14,13 +14,10 @@ make_template_files() {
         download_file "./template_files/proxmox.sources" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/proxmox.sources"
         download_file "./template_files/sshd_config" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/sshd_config"
         download_file "./template_files/zshrc" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/zshrc"
-        download_file "./template_files/p10k.zsh" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/p10k.zsh"
         download_file "./template_files/chrony" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/chrony"
         download_file "./template_files/50unattended-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/50unattended-upgrades"
         download_file "./template_files/20auto-upgrades" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/20auto-upgrades"
         download_file "./template_files/interfaces" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/${interfaces_template}"
-        download_file "./template_files/pve-remove-nag" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/pve-remove-nag"
-        download_file "./template_files/99-pve-nag-removal" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/99-pve-nag-removal"
     ) > /dev/null 2>&1 &
     show_progress $! "Downloading template files"
 
@@ -119,34 +116,16 @@ configure_proxmox_via_ssh() {
         apt-get install -yqq libguestfs-tools 2>/dev/null || true
     ' "System utilities installed"
 
-    # Install ZSH with Oh-My-Zsh and Powerlevel10k if selected
+    # Install ZSH with plugins if selected
     if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
-        remote_exec_with_progress "Installing ZSH and Git" '
+        remote_exec_with_progress "Installing ZSH with plugins" '
             export DEBIAN_FRONTEND=noninteractive
-            apt-get install -yqq zsh git curl 2>/dev/null || {
-                for pkg in zsh git curl; do
+            apt-get install -yqq zsh zsh-autosuggestions zsh-syntax-highlighting 2>/dev/null || {
+                for pkg in zsh zsh-autosuggestions zsh-syntax-highlighting; do
                     apt-get install -yqq "$pkg" 2>/dev/null || true
                 done
             }
-        ' "ZSH and Git installed"
-
-        remote_exec_with_progress "Installing Oh-My-Zsh" '
-            export DEBIAN_FRONTEND=noninteractive
-            # Install Oh-My-Zsh unattended
-            sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-        ' "Oh-My-Zsh installed"
-
-        remote_exec_with_progress "Installing Powerlevel10k theme" '
-            # Clone Powerlevel10k theme
-            git clone --depth=1 https://github.com/romkatv/powerlevel10k.git /root/.oh-my-zsh/custom/themes/powerlevel10k 2>/dev/null || true
-        ' "Powerlevel10k theme installed"
-
-        remote_exec_with_progress "Installing ZSH plugins" '
-            # Clone zsh-autosuggestions plugin
-            git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions /root/.oh-my-zsh/custom/plugins/zsh-autosuggestions 2>/dev/null || true
-            # Clone zsh-syntax-highlighting plugin
-            git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting /root/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting 2>/dev/null || true
-        ' "ZSH plugins installed"
+        ' "ZSH with plugins installed"
     fi
 
     # Configure UTF-8 locales (fix for btop and other apps)
@@ -185,10 +164,9 @@ ENVEOF
     if [[ "$DEFAULT_SHELL" == "zsh" ]]; then
         (
             remote_copy "template_files/zshrc" "/root/.zshrc"
-            remote_copy "template_files/p10k.zsh" "/root/.p10k.zsh"
             remote_exec "chsh -s /bin/zsh root"
         ) > /dev/null 2>&1 &
-        show_progress $! "Configuring ZSH with Powerlevel10k" "ZSH + Powerlevel10k configured"
+        show_progress $! "Configuring ZSH" "ZSH configured as default shell"
     else
         print_success "Bash configured as default shell"
     fi
@@ -302,35 +280,8 @@ ENVEOF
 
             # Disable OpenSSH when Tailscale SSH is enabled and authenticated
             if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-                remote_exec_with_progress "Disabling OpenSSH" '
-                    # Stop and disable SSH service
-                    systemctl stop ssh sshd 2>/dev/null || true
-                    systemctl disable ssh sshd 2>/dev/null || true
-                    # Also disable socket activation (important!)
-                    systemctl stop ssh.socket sshd.socket 2>/dev/null || true
-                    systemctl disable ssh.socket sshd.socket 2>/dev/null || true
-                    # Mask the services to prevent any reactivation
-                    systemctl mask ssh.service ssh.socket 2>/dev/null || true
-                ' "OpenSSH disabled (using Tailscale SSH only)"
-            fi
-
-            # Block all incoming connections to public IP (Tailscale-only access)
-            if [[ "$TAILSCALE_BLOCK_PUBLIC_IP" == "yes" ]]; then
-                (
-                    # Download and configure firewall templates
-                    download_file "./template_files/tailscale-firewall.sh" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/tailscale-firewall.sh"
-                    download_file "./template_files/tailscale-firewall.service" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/tailscale-firewall.service"
-                    sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/tailscale-firewall.sh
-
-                    # Deploy firewall script and service
-                    remote_exec "mkdir -p /etc/iptables"
-                    remote_copy "template_files/tailscale-firewall.sh" "/etc/iptables/tailscale-firewall.sh"
-                    remote_copy "template_files/tailscale-firewall.service" "/etc/systemd/system/tailscale-firewall.service"
-                    remote_exec "chmod +x /etc/iptables/tailscale-firewall.sh"
-                    remote_exec "/etc/iptables/tailscale-firewall.sh"
-                    remote_exec "systemctl daemon-reload && systemctl enable tailscale-firewall.service"
-                ) > /dev/null 2>&1 &
-                show_progress $! "Configuring firewall to block public IP" "Firewall configured: public IP blocked (Tailscale-only)"
+                remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
+                show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
             fi
         else
             TAILSCALE_IP="not authenticated"
@@ -343,28 +294,27 @@ ENVEOF
         fi
     fi
 
-    # Deploy SSH key and hardened config (always apply hardening for security)
-    (
-        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-    ) > /dev/null 2>&1 &
+    # Deploy SSH hardening (skip if Tailscale SSH is active)
     if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # Only deploy SSH key for emergency access, but keep SSH disabled
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
     else
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+            remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
-    # Sync filesystem and power off the VM (ignore exit code - SSH connection closes when VM shuts down)
-    remote_exec "sync" > /dev/null 2>&1
+    # Power off the VM
     remote_exec "poweroff" > /dev/null 2>&1 &
     show_progress $! "Powering off the VM"
 
-    # Wait for QEMU to exit (with fallback to force kill)
-    if ! wait_with_progress "Waiting for QEMU process to exit" 60 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"; then
-        # Force kill QEMU if graceful shutdown timed out
-        kill -9 $QEMU_PID 2>/dev/null || true
-        sleep 1
-        printf "${CLR_YELLOW}⚠ QEMU process was force-terminated${CLR_RESET}\n"
-    fi
+    # Wait for QEMU to exit
+    wait_with_progress "Waiting for QEMU process to exit" 120 "! kill -0 $QEMU_PID 2>/dev/null" 1 "QEMU process exited"
 }
