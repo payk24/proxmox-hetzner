@@ -97,7 +97,7 @@ get_inputs_non_interactive() {
     PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
     DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
     TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
-    EMAIL="${EMAIL:-admin@example.com}"
+    EMAIL="${EMAIL:-admin@qoxi.cloud}"
     BRIDGE_MODE="${BRIDGE_MODE:-internal}"
     PRIVATE_SUBNET="${PRIVATE_SUBNET:-10.0.0.0/24}"
 
@@ -207,7 +207,7 @@ get_inputs_interactive() {
     else
         prompt_with_validation \
             "Enter your email address: " \
-            "admin@example.com" \
+            "admin@qoxi.cloud" \
             "validate_email" \
             "Invalid email address format." \
             "EMAIL"
