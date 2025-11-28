@@ -23,6 +23,26 @@ set -e
 cd /root
 
 # =============================================================================
+# Error handling - log where script fails
+# =============================================================================
+error_handler() {
+    local exit_code=$?
+    local line_no=$1
+    local command="$2"
+    echo ""
+    echo -e "\033[1;31m╔══════════════════════════════════════════════════════════════╗\033[m"
+    echo -e "\033[1;31m║ SCRIPT FAILED                                                ║\033[m"
+    echo -e "\033[1;31m╠══════════════════════════════════════════════════════════════╣\033[m"
+    echo -e "\033[1;31m║ Line:     $line_no\033[m"
+    echo -e "\033[1;31m║ Exit code: $exit_code\033[m"
+    echo -e "\033[1;31m║ Command:  ${command:0:50}\033[m"
+    echo -e "\033[1;31m╚══════════════════════════════════════════════════════════════╝\033[m"
+    echo ""
+    echo "Check log file: $LOG_FILE"
+}
+trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
+
+# =============================================================================
 # Colors and configuration
 # =============================================================================
 CLR_RED="\033[1;31m"
@@ -448,6 +468,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 SSH_PORT="5555"
 
 remote_exec() {
+    log "remote_exec: $*"
     sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost "$@"
 }
 
@@ -461,16 +482,22 @@ remote_exec_with_progress() {
     local script="$2"
     local done_message="${3:-$message}"
 
+    log "remote_exec_with_progress: $message"
     echo "$script" | sshpass -p "$NEW_ROOT_PASSWORD" ssh -p "$SSH_PORT" $SSH_OPTS root@localhost 'bash -s' > /dev/null 2>&1 &
     local pid=$!
     show_progress $pid "$message" "$done_message"
     wait $pid
-    return $?
+    local exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        log "remote_exec_with_progress FAILED: $message (exit code: $exit_code)"
+    fi
+    return $exit_code
 }
 
 remote_copy() {
     local src="$1"
     local dst="$2"
+    log "remote_copy: $src -> $dst"
     sshpass -p "$NEW_ROOT_PASSWORD" scp -P "$SSH_PORT" $SSH_OPTS "$src" "root@localhost:$dst"
 }
 
@@ -792,6 +819,7 @@ prompt_password() {
 
 # Collect system info with progress indicator
 collect_system_info() {
+    log "=== Starting collect_system_info ==="
     local errors=0
     local checks=7
     local current=0
@@ -1572,9 +1600,12 @@ get_system_inputs() {
 # =============================================================================
 
 prepare_packages() {
+    log "=== Starting prepare_packages ==="
+    log "Adding Proxmox repository"
     echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" > /etc/apt/sources.list.d/pve.list
 
     # Download Proxmox GPG key
+    log "Downloading Proxmox GPG key"
     curl -fsSL -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg &
     show_progress $! "Downloading Proxmox GPG key" "Proxmox GPG key downloaded"
     wait $!
@@ -1584,6 +1615,7 @@ prepare_packages() {
     fi
 
     # Update package lists
+    log "Updating package lists"
     apt clean > /dev/null 2>&1
     apt update > /dev/null 2>&1 &
     show_progress $! "Updating package lists" "Package lists updated"
@@ -1594,6 +1626,7 @@ prepare_packages() {
     fi
 
     # Install packages
+    log "Installing required packages"
     apt install -yq proxmox-auto-install-assistant xorriso ovmf wget sshpass > /dev/null 2>&1 &
     show_progress $! "Installing required packages" "Required packages installed"
     wait $!
@@ -1617,11 +1650,14 @@ get_latest_proxmox_ve_iso() {
 }
 
 download_proxmox_iso() {
+    log "=== Starting download_proxmox_iso ==="
     if [[ -f "pve.iso" ]]; then
+        log "Proxmox ISO already exists"
         print_success "Proxmox ISO already exists, skipping download"
         return 0
     fi
 
+    log "Fetching latest Proxmox ISO URL"
     PROXMOX_ISO_URL=$(get_latest_proxmox_ve_iso)
     if [[ -z "$PROXMOX_ISO_URL" ]]; then
         print_error "Failed to retrieve Proxmox ISO URL! Exiting."
@@ -1675,6 +1711,8 @@ download_proxmox_iso() {
 }
 
 make_answer_toml() {
+    log "=== Creating answer.toml ==="
+    log "ZFS_RAID=$ZFS_RAID, FQDN=$FQDN, EMAIL=$EMAIL"
     # Build disk_list based on ZFS_RAID mode (using vda/vdb for QEMU virtio)
     case "$ZFS_RAID" in
         single)
@@ -1711,10 +1749,12 @@ EOF
 }
 
 make_autoinstall_iso() {
+    log "=== Creating autoinstall ISO ==="
     proxmox-auto-install-assistant prepare-iso pve.iso --fetch-from iso --answer-file answer.toml --output pve-autoinstall.iso > /dev/null 2>&1 &
     show_progress $! "Creating autoinstall ISO" "Autoinstall ISO created"
 
     # Remove original ISO to save disk space (only autoinstall ISO is needed)
+    log "Removing original ISO to save space"
     rm -f pve.iso
 }
 
@@ -1729,11 +1769,14 @@ is_uefi_mode() {
 
 # Configure QEMU settings (shared between install and boot)
 setup_qemu_config() {
+    log "=== Configuring QEMU settings ==="
     # UEFI configuration
     if is_uefi_mode; then
         UEFI_OPTS="-bios /usr/share/ovmf/OVMF.fd"
+        log "UEFI mode detected"
     else
         UEFI_OPTS=""
+        log "Legacy BIOS mode"
     fi
 
     # CPU and RAM configuration
@@ -1748,28 +1791,36 @@ setup_qemu_config() {
     QEMU_RAM=8192
     [[ $available_ram_mb -lt 16384 ]] && QEMU_RAM=4096
 
+    log "QEMU config: ${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM"
+
     # Drive configuration
     DRIVE_ARGS="-drive file=$NVME_DRIVE_1,format=raw,media=disk,if=virtio"
     [[ -n "$NVME_DRIVE_2" ]] && DRIVE_ARGS="$DRIVE_ARGS -drive file=$NVME_DRIVE_2,format=raw,media=disk,if=virtio"
+    log "Drive args: $DRIVE_ARGS"
 }
 
 # Install Proxmox via QEMU
 install_proxmox() {
+    log "=== Starting install_proxmox ==="
     setup_qemu_config
 
     # Run QEMU in background and show progress
+    log "Starting QEMU for Proxmox installation"
     qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -smp $QEMU_CORES -m $QEMU_RAM \
         -boot d -cdrom ./pve-autoinstall.iso \
         $DRIVE_ARGS -no-reboot -display none > /dev/null 2>&1 &
 
     show_progress $! "Installing Proxmox VE (${QEMU_CORES} vCPUs, ${QEMU_RAM}MB RAM)" "Proxmox VE installed"
+    log "QEMU installation process completed"
 }
 
 # Boot installed Proxmox with SSH port forwarding
 boot_proxmox_with_port_forwarding() {
+    log "=== Starting boot_proxmox_with_port_forwarding ==="
     setup_qemu_config
 
+    log "Starting QEMU with SSH port forwarding (localhost:5555 -> VM:22)"
     nohup qemu-system-x86_64 -enable-kvm $UEFI_OPTS \
         -cpu host -device e1000,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::5555-:22 \
@@ -1778,9 +1829,12 @@ boot_proxmox_with_port_forwarding() {
         > qemu_output.log 2>&1 &
 
     QEMU_PID=$!
+    log "QEMU PID: $QEMU_PID"
 
     # Wait for SSH with progress indicator (timeout 5 minutes)
+    log "Waiting for SSH to become available on port 5555"
     wait_with_progress "Booting installed Proxmox" 300 "(echo >/dev/tcp/localhost/5555)" 3 "Proxmox booted, SSH available"
+    log "SSH is available"
 }
 
 # --- 10-configure.sh ---
@@ -1789,8 +1843,10 @@ boot_proxmox_with_port_forwarding() {
 # =============================================================================
 
 make_template_files() {
+    log "=== Starting make_template_files ==="
     mkdir -p ./template_files
     local interfaces_template="interfaces.${BRIDGE_MODE:-internal}"
+    log "Using interfaces template: $interfaces_template"
 
     # Download template files in background with progress
     (
@@ -1829,9 +1885,13 @@ make_template_files() {
 
 # Configure the installed Proxmox via SSH
 configure_proxmox_via_ssh() {
+    log "=== Starting configure_proxmox_via_ssh ==="
     make_template_files
+
+    log "Clearing SSH known hosts for localhost:5555"
     ssh-keygen -f "/root/.ssh/known_hosts" -R "[localhost]:5555" 2>/dev/null || true
 
+    log "=== Copying template files ==="
     # Copy template files
     remote_copy "template_files/hosts" "/etc/hosts"
     remote_copy "template_files/interfaces" "/etc/network/interfaces"
@@ -1839,11 +1899,12 @@ configure_proxmox_via_ssh() {
     remote_copy "template_files/debian.sources" "/etc/apt/sources.list.d/debian.sources"
     remote_copy "template_files/proxmox.sources" "/etc/apt/sources.list.d/proxmox.sources"
 
+    log "=== Basic system configuration ==="
     # Basic system configuration
-    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak"
+    remote_exec "[ -f /etc/apt/sources.list ] && mv /etc/apt/sources.list /etc/apt/sources.list.bak" || true
     remote_exec "echo -e 'nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\nnameserver 8.8.4.4' > /etc/resolv.conf"
     remote_exec "echo '$PVE_HOSTNAME' > /etc/hostname"
-    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null"
+    remote_exec "systemctl disable --now rpcbind rpcbind.socket 2>/dev/null" || true
 
     # Configure ZFS ARC memory limits
     remote_exec_with_progress "Configuring ZFS ARC memory limits" '
@@ -2266,24 +2327,45 @@ reboot_to_main_os() {
 # Main execution flow
 # =============================================================================
 
+log "=========================================="
+log "=== PROXMOX INSTALLER STARTED ==="
+log "=========================================="
+
 # Collect system info and display status
+log "Step 1: Collecting system info"
 collect_system_info
 show_system_status
+
+log "Step 2: Getting user inputs"
 get_system_inputs
+
+log "Step 3: Preparing packages"
 prepare_packages
+
+log "Step 4: Downloading Proxmox ISO"
 download_proxmox_iso
+
+log "Step 5: Creating answer.toml"
 make_answer_toml
+
+log "Step 6: Creating autoinstall ISO"
 make_autoinstall_iso
+
+log "Step 7: Installing Proxmox via QEMU"
 install_proxmox
 
 # Boot and configure via SSH
+log "Step 8: Booting Proxmox with SSH port forwarding"
 boot_proxmox_with_port_forwarding || {
+    log "ERROR: Failed to boot Proxmox with port forwarding"
     print_error "Failed to boot Proxmox with port forwarding. Exiting."
     exit 1
 }
 
 # Configure Proxmox via SSH
+log "Step 9: Configuring Proxmox via SSH"
 configure_proxmox_via_ssh
 
+log "Step 10: Installation complete, rebooting"
 # Reboot to the main OS
 reboot_to_main_os
