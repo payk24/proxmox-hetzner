@@ -27,7 +27,6 @@ reboot_to_main_os() {
     summary+="[OK]|ZFS ARC limits|configured"$'\n'
     summary+="[OK]|nf_conntrack|optimized"$'\n'
     summary+="[OK]|NTP sync|chrony (Hetzner)"$'\n'
-    summary+="[OK]|Dynamic MOTD|enabled"$'\n'
     summary+="[OK]|Security updates|unattended"$'\n'
 
     # Tailscale status
