@@ -303,6 +303,25 @@ ENVEOF
                 remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
                 show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
             fi
+
+            # Block all incoming connections to public IP (Tailscale-only access)
+            if [[ "$TAILSCALE_BLOCK_PUBLIC_IP" == "yes" ]]; then
+                (
+                    # Download and configure firewall templates
+                    download_file "./template_files/tailscale-firewall.sh" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/tailscale-firewall.sh"
+                    download_file "./template_files/tailscale-firewall.service" "https://github.com/qoxi-cloud/proxmox-hetzner/raw/refs/heads/main/template_files/tailscale-firewall.service"
+                    sed -i "s|{{INTERFACE_NAME}}|$INTERFACE_NAME|g" ./template_files/tailscale-firewall.sh
+
+                    # Deploy firewall script and service
+                    remote_exec "mkdir -p /etc/iptables"
+                    remote_copy "template_files/tailscale-firewall.sh" "/etc/iptables/tailscale-firewall.sh"
+                    remote_copy "template_files/tailscale-firewall.service" "/etc/systemd/system/tailscale-firewall.service"
+                    remote_exec "chmod +x /etc/iptables/tailscale-firewall.sh"
+                    remote_exec "/etc/iptables/tailscale-firewall.sh"
+                    remote_exec "systemctl daemon-reload && systemctl enable tailscale-firewall.service"
+                ) > /dev/null 2>&1 &
+                show_progress $! "Configuring firewall to block public IP" "Firewall configured: public IP blocked (Tailscale-only)"
+            fi
         else
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""

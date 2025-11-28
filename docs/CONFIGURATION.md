@@ -71,6 +71,7 @@ You can pre-configure any setting via environment variables. In **interactive mo
 | `TAILSCALE_AUTH_KEY` | Tailscale auth key | - |
 | `TAILSCALE_SSH` | Enable Tailscale SSH | `yes` |
 | `TAILSCALE_WEBUI` | Enable Tailscale Web UI | `yes` |
+| `TAILSCALE_BLOCK_PUBLIC_IP` | Block all connections to public IP | `no` |
 
 ## Examples
 
