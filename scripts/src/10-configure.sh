@@ -322,20 +322,15 @@ ENVEOF
         fi
     fi
 
-    # Deploy SSH hardening (skip if Tailscale SSH is active)
+    # Deploy SSH key and hardened config (always apply hardening for security)
+    (
+        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+    ) > /dev/null 2>&1 &
     if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
-        # Only deploy SSH key for emergency access, but keep SSH disabled
-        (
-            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
     else
-        (
-            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-            remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-        ) > /dev/null 2>&1 &
         show_progress $! "Deploying SSH hardening" "Security hardening configured"
     fi
 
