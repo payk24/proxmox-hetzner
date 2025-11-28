@@ -1,0 +1,12 @@
+[Unit]
+Description=Tailscale Firewall Rules (Block Public IP Access)
+After=network.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/iptables/tailscale-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
