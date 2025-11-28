@@ -300,8 +300,16 @@ ENVEOF
 
             # Disable OpenSSH when Tailscale SSH is enabled and authenticated
             if [[ "$TAILSCALE_SSH" == "yes" ]]; then
-                remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
-                show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
+                remote_exec_with_progress "Disabling OpenSSH" '
+                    # Stop and disable SSH service
+                    systemctl stop ssh sshd 2>/dev/null || true
+                    systemctl disable ssh sshd 2>/dev/null || true
+                    # Also disable socket activation (important!)
+                    systemctl stop ssh.socket sshd.socket 2>/dev/null || true
+                    systemctl disable ssh.socket sshd.socket 2>/dev/null || true
+                    # Mask the services to prevent any reactivation
+                    systemctl mask ssh.service ssh.socket 2>/dev/null || true
+                ' "OpenSSH disabled (using Tailscale SSH only)"
             fi
         else
             TAILSCALE_IP="not authenticated"
