@@ -94,7 +94,7 @@ collect_network_info() {
 
 get_inputs_non_interactive() {
     # Use defaults or config values
-    PVE_HOSTNAME="${PVE_HOSTNAME:-pve}"
+    PVE_HOSTNAME="${PVE_HOSTNAME:-pve-qoxi-cloud}"
     DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-local}"
     TIMEZONE="${TIMEZONE:-Europe/Kyiv}"
     EMAIL="${EMAIL:-admin@qoxi.cloud}"
@@ -185,8 +185,8 @@ get_inputs_interactive() {
         print_success "Hostname: ${PVE_HOSTNAME} (from env)"
     else
         prompt_with_validation \
-            "Enter your hostname (e.g., pve, proxmox): " \
-            "pve" \
+            "Enter your hostname (e.g., pve-qoxi-cloud, proxmox): " \
+            "pve-qoxi-cloud" \
             "validate_hostname" \
             "Invalid hostname. Use only letters, numbers, and hyphens (1-63 chars)." \
             "PVE_HOSTNAME"

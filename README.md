@@ -106,7 +106,7 @@ You can pre-configure any setting via environment variables. In **interactive mo
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `PVE_HOSTNAME` | Server hostname | `pve` | No |
+| `PVE_HOSTNAME` | Server hostname | `pve-qoxi-cloud` | No |
 | `DOMAIN_SUFFIX` | Domain suffix for FQDN | `local` | No |
 | `TIMEZONE` | System timezone | `Europe/Kyiv` | No |
 | `EMAIL` | Admin email | `admin@qoxi.cloud` | No |
