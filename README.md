@@ -12,7 +12,8 @@
 
 ## Overview
 
-Automated Proxmox VE installation on Hetzner dedicated servers **without console access**. Works with [AX](https://www.hetzner.com/dedicated-rootserver/matrix-ax), [EX](https://www.hetzner.com/dedicated-rootserver/matrix-ex), and [SX](https://www.hetzner.com/dedicated-rootserver/matrix-sx) series.
+Automated Proxmox VE installation on Hetzner dedicated servers **without console access**.
+Works with [AX](https://www.hetzner.com/dedicated-rootserver/matrix-ax), [EX](https://www.hetzner.com/dedicated-rootserver/matrix-ex), and [SX](https://www.hetzner.com/dedicated-rootserver/matrix-sx) series.
 
 **Key Features:**
 - Interactive menus with arrow key navigation
@@ -76,3 +77,4 @@ See [Configuration Guide](docs/CONFIGURATION.md) for all options.
 ## License
 
 [MIT License](LICENSE)
+
