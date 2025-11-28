@@ -108,24 +108,45 @@ reboot_to_main_os() {
 # Main execution flow
 # =============================================================================
 
+log "=========================================="
+log "=== PROXMOX INSTALLER STARTED ==="
+log "=========================================="
+
 # Collect system info and display status
+log "Step 1: Collecting system info"
 collect_system_info
 show_system_status
+
+log "Step 2: Getting user inputs"
 get_system_inputs
+
+log "Step 3: Preparing packages"
 prepare_packages
+
+log "Step 4: Downloading Proxmox ISO"
 download_proxmox_iso
+
+log "Step 5: Creating answer.toml"
 make_answer_toml
+
+log "Step 6: Creating autoinstall ISO"
 make_autoinstall_iso
+
+log "Step 7: Installing Proxmox via QEMU"
 install_proxmox
 
 # Boot and configure via SSH
+log "Step 8: Booting Proxmox with SSH port forwarding"
 boot_proxmox_with_port_forwarding || {
+    log "ERROR: Failed to boot Proxmox with port forwarding"
     print_error "Failed to boot Proxmox with port forwarding. Exiting."
     exit 1
 }
 
 # Configure Proxmox via SSH
+log "Step 9: Configuring Proxmox via SSH"
 configure_proxmox_via_ssh
 
+log "Step 10: Installation complete, rebooting"
 # Reboot to the main OS
 reboot_to_main_os

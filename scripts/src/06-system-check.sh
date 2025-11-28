@@ -4,6 +4,7 @@
 
 # Collect system info with progress indicator
 collect_system_info() {
+    log "=== Starting collect_system_info ==="
     local errors=0
     local checks=7
     local current=0
