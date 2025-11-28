@@ -245,6 +245,12 @@ ENVEOF
                 remote_exec "tailscale serve --bg --https=443 https://127.0.0.1:8006" > /dev/null 2>&1 &
                 show_progress $! "Configuring Tailscale Serve" "Proxmox Web UI available via Tailscale Serve"
             fi
+
+            # Disable OpenSSH when Tailscale SSH is enabled and authenticated
+            if [[ "$TAILSCALE_SSH" == "yes" ]]; then
+                remote_exec "systemctl disable --now ssh sshd 2>/dev/null || true" > /dev/null 2>&1 &
+                show_progress $! "Disabling OpenSSH" "OpenSSH disabled (using Tailscale SSH only)"
+            fi
         else
             TAILSCALE_IP="not authenticated"
             TAILSCALE_HOSTNAME=""
@@ -252,16 +258,26 @@ ENVEOF
             print_info "After reboot, run these commands to enable SSH and Web UI:"
             print_info "  tailscale up --ssh"
             print_info "  tailscale serve --bg --https=443 https://127.0.0.1:8006"
+            print_info "Then disable OpenSSH: systemctl disable --now ssh"
         fi
     fi
 
-    # Deploy SSH hardening LAST (after all other operations)
-    (
-        remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
-        remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
-        remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
-    ) > /dev/null 2>&1 &
-    show_progress $! "Deploying SSH hardening" "Security hardening configured"
+    # Deploy SSH hardening (skip if Tailscale SSH is active)
+    if [[ "$TAILSCALE_SSH" == "yes" && -n "$TAILSCALE_AUTH_KEY" ]]; then
+        # Only deploy SSH key for emergency access, but keep SSH disabled
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+        ) > /dev/null 2>&1 &
+        show_progress $! "Deploying SSH key" "SSH key deployed (for emergency access)"
+    else
+        (
+            remote_exec "mkdir -p /root/.ssh && chmod 700 /root/.ssh"
+            remote_exec "echo '$SSH_PUBLIC_KEY' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+            remote_copy "template_files/sshd_config" "/etc/ssh/sshd_config"
+        ) > /dev/null 2>&1 &
+        show_progress $! "Deploying SSH hardening" "Security hardening configured"
+    fi
 
     # Power off the VM
     remote_exec "poweroff" > /dev/null 2>&1 &
